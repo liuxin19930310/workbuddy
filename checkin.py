@@ -11,6 +11,8 @@
      macOS:   ~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info
 
 可选：设置 SERVERCHAN_KEY 后，结果会推送到微信（Server 酱）。
+    推送策略：只在「领取成功（claimed）」或「出错（error）」时推送。
+    每天 5 个触发时点里有 4 次是 skip（今日已领），推它们纯属骚扰，因此静默。
 
 退出码：0 = 签到成功或今日已签到；1 = 失败（令牌失效 / 网络异常 / 未知错误）
 安全约定：全程不打印、不落盘任何令牌内容。
@@ -99,11 +101,55 @@ def notify(title, content):
         pass
 
 
-def emit(result, notify_it=True):
+def build_title(result):
+    if result.get("status") == "error":
+        return "WorkBuddy 签到异常，需要处理"
+    if result.get("action") == "claimed":
+        credit = result.get("credit")
+        return "WorkBuddy 签到成功 +%s 积分" % (credit if credit is not None else "?")
+    return "WorkBuddy 签到"
+
+
+def build_body(result):
+    if result.get("status") == "error":
+        outcome = "异常"
+    else:
+        outcome = {
+            "claimed": "领取成功",
+            "skip_already_signed": "今日已签到，无需重复领取",
+        }.get(result.get("action"), result.get("status", ""))
+    lines = [
+        "时间：%s" % result.get("time", ""),
+        "结果：%s" % outcome,
+    ]
+    if result.get("credit") is not None:
+        lines.append("本次积分：+%s" % result["credit"])
+    if result.get("streak_days") is not None:
+        lines.append("连续签到：%s 天" % result["streak_days"])
+    # 仅在出错时重复打印原因，成功路径的 msg 与「结果」重复，没必要刷屏
+    if result.get("status") == "error" and result.get("msg"):
+        lines.append("原因：%s" % result["msg"])
+    return "\n".join(lines)
+
+
+# 推送策略：只在「真正领到积分」或「出错」时推送。
+# 每天有 5 个触发时点，其中 4 次是 skip（今日已领），推它们纯属骚扰。
+PUSH_ACTIONS = ("claimed",)
+
+
+def should_push(result):
+    if result.get("status") == "error":
+        return True
+    return result.get("action") in PUSH_ACTIONS
+
+
+def emit(result, notify_it=None):
     line = json.dumps(result, ensure_ascii=False)
     print(line)
+    if notify_it is None:
+        notify_it = should_push(result)
     if notify_it:
-        notify("WorkBuddy 签到 %s" % result.get("status"), line)
+        notify(build_title(result), build_body(result) + "\n\n原始输出：" + line)
 
 
 def main():
@@ -119,7 +165,7 @@ def main():
 
     if not token:
         emit({"status": "error", "action": "none", "time": now_cn(),
-              "msg": "未找到令牌：请设置环境变量 WB_TOKEN，或先在本机登录 WorkBuddy 桌面端"}, notify_it=False)
+              "msg": "未找到令牌：请设置环境变量 WB_TOKEN，或先在本机登录 WorkBuddy 桌面端"})
         return 1
 
     domain = domain or DEFAULT_DOMAIN
