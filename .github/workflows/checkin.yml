@@ -41,8 +41,11 @@ jobs:
           WB_DOMAIN: www.codebuddy.cn
           # 可选：填 Server 酱 SendKey 可推送微信；不需要则删除下面这行
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
-          # 手动触发时勾选 force_notify=true，可强制推一条，用于验证推送配置
-          FORCE_NOTIFY: ${{ inputs.force_notify }}
+          # 手动触发时勾选 force_notify=true，可强制推一条，用于验证推送配置。
+          # 用 github.event.inputs 而非 inputs：inputs 上下文仅在 workflow_dispatch /
+          # workflow_call 可用，定时(schedule)触发时引用它可能直接报错导致整个 job 失败，
+          # 而定时触发恰恰是本任务的主要运行方式。
+          FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}
         run: python checkin.py
 
       # 本仓库只承载这一个自动化，长期无提交会被 GitHub 自动停用定时任务。
