@@ -38,6 +38,10 @@ jobs:
 
       # 本仓库只承载这一个自动化，长期无提交会被 GitHub 自动停用定时任务。
       # 该步骤每月写入一次心跳文件并提交，确保仓库始终有活动；失败不影响签到结果。
+      #
+      # 注意：schedule / workflow_dispatch 触发的运行，actions/checkout 会以 detached HEAD
+      # 检出提交，此时裸 `git push` 会报 "You are not currently on a branch" 而静默失败
+      # （本步骤是 continue-on-error，不会让 job 变红，所以必须显式指定目标分支）。
       - name: Keep repository active (monthly heartbeat commit)
         continue-on-error: true
         env:
@@ -56,4 +60,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$STAMP"
           git commit -m "chore: monthly heartbeat ${THIS_MONTH}"
-          git push
+          git push origin HEAD:main
