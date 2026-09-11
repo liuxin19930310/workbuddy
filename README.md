@@ -1,10 +1,17 @@
-# WorkBuddy Buddy 加油站 · 自动签到
+# WorkBuddy 每日自动任务集
 
-用 GitHub Actions 每天定时调用 WorkBuddy 官方签到接口领取积分。**不依赖本机是否开机** —— 电脑关机、出差、假期都能照常签到。
+用 GitHub Actions 每天定时调用 WorkBuddy 官方接口，**不依赖本机是否开机** —— 电脑关机、出差、假期都能照常跑。
 
-这是为此目的单独建立的仓库，只承载这一个自动化任务。
+本仓库承载两个独立自动化，共用同一个令牌 Secret：
+
+| 自动化 | 脚本 | 工作流 | 做什么 |
+|---|---|---|---|
+| **Buddy 加油站签到** | `checkin.py` | `checkin.yml` | 每日领取签到积分（+100，连签有额外奖励） |
+| **派猫猫旅行** | `travel.py` | `travel.yml` | 派出猫猫旅行 → 归来后自动领取 5~10 积分（每日闭环） |
 
 ---
+
+# 第一部分：Buddy 加油站签到
 
 ## 一、原理（已在本机实测验证）
 
@@ -170,10 +177,86 @@ python checkin.py
 
 ---
 
+# 第二部分：派猫猫旅行自动闭环
+
+## 一、玩法与自动化思路
+
+「成长计划 → Buddy → 派猫猫旅行」：把 Buddy 派去一个地点旅行 **1~4 小时**，归来可领 **5~10 积分**，**每日限一次**。地点：咖啡馆 / 商场店铺 / 健身房 / 古镇客栈。
+
+手动玩的问题是「要在固定时间窗口回来领」—— 忘了当天额度就作废。所以做成定时巡检：
+
+```
+GET /status 读服务端状态
+    state=arrived            → POST /claim   领取（只领一次）
+    state=traveling          → 跳过          绝不重复派出
+    daily_limit_reached=true → 跳过          今日额度已用尽
+    state=idle（额度未用）    → POST /depart  派出旅行
+```
+
+**幂等由服务端状态保证**：脚本自身无状态，重复执行、定时器抖动都不会重复派或重复领。每次运行只做一次「读状态 → 定动作」，不做后台长时间轮询。
+
+## 二、接口（已在本机实测，与网上流传的说法有出入）
+
+| 项 | 实测结论 |
+|---|---|
+| 域名 | `https://www.workbuddy.cn` |
+| 路径前缀 | `/activity/growth/buddy/travel/` |
+| 端点 | `GET /status`、`GET /config`、`POST /depart`、`POST /claim` |
+| 鉴权 | **桌面端 Bearer 令牌可用**（无需浏览器 Cookie） |
+| 关键字段 | `state`（idle/traveling/arrived）、`daily_limit_reached`、`record_id`、`arrive_at`、`reward_credit`、`location.name`、`server_now` |
+| depart 参数 | **`location_id`**（传错值时服务端明确回 `location not available`，字段名由此确认） |
+
+> ⚠️ 与网文说法的出入：网上教程称「必须用浏览器 Cookie，且路径不能带 /v2/，否则 401」。本机实测：**Bearer 令牌可用**，且**带不带 `/v2/` 都返回 200**（网文的 401 是因为当时没有有效凭据，与路径无关）。因此这里复用签到那一个令牌，无需维护易过期的 Cookie，也就能放进 GitHub Actions。
+
+## 三、调度说明
+
+```yaml
+- cron: '15 0 * * *'   # 北京 08:15  派出（若额度未用）
+- cron: '30 4 * * *'   # 北京 12:30  巡检领取
+- cron: '45 8 * * *'   # 北京 16:45  巡检领取
+- cron: '0 13 * * *'   # 北京 21:00  兜底
+```
+
+因为旅行耗时 1~4 小时是随机的，单点定时会漏领；四个时点保证「无论随机到几小时，当天都能被领取」。
+
+## 四、手动操作
+
+`Actions → WorkBuddy Cat Travel → Run workflow`，可勾选：
+
+- `dry_run = true`：只查状态，不派出也不领取（安全的观察模式）
+- `location = 1/2/3/4`：指定地点，留 `0` 为随机
+
+本机调试：
+
+```bash
+python travel.py --dry-run      # 只看状态
+python travel.py                # 跑一轮
+python travel.py --location 1   # 指定咖啡馆
+```
+
+## 五、推送策略
+
+与签到一致，**按需推送**（不会一天刷你一脸）：
+
+| 场景 | 推送 | 标题 |
+|---|---|---|
+| 领取成功 | ✅ | `猫猫旅行归来 +8 积分` |
+| 派出成功 | ✅ | `猫猫已出发 · 咖啡馆` |
+| 出错 | ✅ | `WorkBuddy 猫猫旅行异常，需要处理` |
+| 旅行中 / 今日额度已用尽 | ❌ 静默 | — |
+
+正常一天最多 2 条（派出 1 条 + 领取 1 条）。
+
+---
+
 ## 文件说明
 
 | 文件 | 作用 |
 |---|---|
 | `checkin.py` | 签到主脚本。零第三方依赖（仅标准库），幂等、令牌全脱敏、按需微信推送；本地/CI 双模式 |
-| `.github/workflows/checkin.yml` | 定时任务定义（UTC cron、手动触发、并发保护、月度心跳保活、action 已用 Node 24 版本） |
+| `travel.py` | 派猫猫旅行闭环脚本。状态机 + 幂等，纯标准库，令牌全脱敏，按需推送；本地/CI 双模式 |
+| `.github/workflows/checkin.yml` | 签到定时任务（UTC cron、手动触发、并发保护、月度心跳保活、Node 24 版 action） |
+| `.github/workflows/travel.yml` | 猫猫旅行定时任务（4 个时点巡检、支持 dry_run 与指定地点） |
 | `get-token.ps1` | 提取本机 accessToken 到剪贴板，只打印脱敏预览与到期时间 |
+
+> 两个自动化共用 Secret：`WB_TOKEN`（令牌）、`SERVERCHAN_KEY`（可选，微信推送）。令牌过期后两个都会失效，此时重跑 `get-token.ps1` 更新 `WB_TOKEN` 即可。

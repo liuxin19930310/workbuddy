@@ -1,0 +1,57 @@
+name: WorkBuddy Cat Travel
+
+on:
+  schedule:
+    # GitHub Actions 的 cron 使用 UTC，北京时间 = UTC + 8
+    # 对应北京时间 08:15 / 12:30 / 16:45 / 21:00
+    # 旅行耗时 1~4 小时，单点定时覆盖不全，用多点巡检推进状态：
+    #   08:15 派出 → 若 1 小时就归来，12:30 领取；4 小时的最迟 16:45 前也已被领取
+    #   21:00 兜底（含当日额度耗尽后的归位）
+    - cron: '15 0 * * *'
+    - cron: '30 4 * * *'
+    - cron: '45 8 * * *'
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只查状态，不做任何写操作（不派出、不领取）'
+        type: boolean
+        default: false
+      location:
+        description: '指定地点：1咖啡馆 2商场店铺 3健身房 4古镇客栈，0=随机'
+        type: string
+        default: '0'
+
+permissions:
+  contents: read
+
+# 与签到任务相互独立，各自加锁即可
+concurrency:
+  group: workbuddy-travel
+  cancel-in-progress: false
+
+jobs:
+  travel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Run cat travel
+        env:
+          # 与签到共用同一个令牌与推送密钥，无需额外配置
+          WB_TOKEN: ${{ secrets.WB_TOKEN }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          LOCATION: ${{ inputs.location }}
+        run: |
+          set -e
+          ARGS=""
+          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ -n "$LOCATION" ] && [ "$LOCATION" != "0" ]; then ARGS="$ARGS --location $LOCATION"; fi
+          echo "python travel.py $ARGS"
+          python travel.py $ARGS
