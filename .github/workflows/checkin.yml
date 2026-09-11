@@ -22,9 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # 使用 Node 24 原生版本，避免 "Node.js 20 is deprecated" 警告
+      # （checkout v5 / setup-python v6 是各自第一个 Node 24 版本，行为差异最小）
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
