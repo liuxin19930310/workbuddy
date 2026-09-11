@@ -1,0 +1,59 @@
+name: WorkBuddy Daily Checkin
+
+on:
+  schedule:
+    # GitHub Actions 的 cron 使用 UTC，北京时间 = UTC + 8
+    # 以下 5 个时点对应北京时间 09:00 / 12:00 / 15:00 / 18:00 / 21:00
+    # 多时点触发 + 幂等逻辑：任一时刻成功领取即可，不会重复领分
+    - cron: '0 1,4,7,10,13 * * *'
+  workflow_dispatch:
+
+# contents: write 供「每月心跳提交」步骤使用，用于防止 GitHub 在仓库长期无提交时停用定时任务
+permissions:
+  contents: write
+
+# 同一时刻只允许一个实例，避免并发重复请求
+concurrency:
+  group: workbuddy-checkin
+  cancel-in-progress: false
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run WorkBuddy checkin
+        env:
+          WB_TOKEN: ${{ secrets.WB_TOKEN }}
+          WB_DOMAIN: www.codebuddy.cn
+          # 可选：填 Server 酱 SendKey 可推送微信；不需要则删除下面这行
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python checkin.py
+
+      # 本仓库只承载这一个自动化，长期无提交会被 GitHub 自动停用定时任务。
+      # 该步骤每月写入一次心跳文件并提交，确保仓库始终有活动；失败不影响签到结果。
+      - name: Keep repository active (monthly heartbeat commit)
+        continue-on-error: true
+        env:
+          TZ: Asia/Shanghai
+        run: |
+          set -e
+          mkdir -p .keepalive
+          STAMP=".keepalive/last-heartbeat.txt"
+          THIS_MONTH="$(date +%Y-%m)"
+          if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$THIS_MONTH" ]; then
+            echo "Heartbeat already updated this month: $THIS_MONTH"
+            exit 0
+          fi
+          echo "$THIS_MONTH" > "$STAMP"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$STAMP"
+          git commit -m "chore: monthly heartbeat ${THIS_MONTH}"
+          git push
