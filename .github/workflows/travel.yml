@@ -46,9 +46,10 @@ jobs:
           # 与签到共用同一个令牌与推送密钥，无需额外配置
           WB_TOKEN: ${{ secrets.WB_TOKEN }}
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
-          # 推送级别：all = 每次巡检都推（当前设置，每天 4 条巡检结果）
-          #           action = 只在派出成功 / 领取成功 / 出错时推（安静模式）
-          PUSH_LEVEL: all
+          # 推送级别：action = 只在派出成功 / 领取成功 / 出错时推（当前设置，每天 ≤2 条，
+          #            即「猫猫已出发」与「猫猫旅行归来」；「旅行中」这类巡检不推）
+          #           all    = 每次巡检都推（每天 4 条，含无动作的巡检结果）
+          PUSH_LEVEL: action
           # 用 github.event.inputs 而非 inputs：inputs 上下文仅在 workflow_dispatch /
           # workflow_call 可用，定时(schedule)触发时其值为 null 且 inputs 段的 default 不生效。
           # github.event.inputs 在所有事件下都存在（非手动触发时为空），配合下方 shell 默认值最稳。
