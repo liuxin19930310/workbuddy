@@ -21,6 +21,9 @@
     推送级别由 PUSH_LEVEL 控制：
       all    = 每次巡检都推送（默认，含「旅行中」「额度已用尽」等巡检结果）
       action = 只在「派出成功 / 领取成功 / 出错」时推送
+    推送结果写回结果 JSON 的 push 字段并打印（CI 下额外输出 GitHub 注解），
+    故 SendKey 填错/未配置时不再静默。
+    ⚠️ 易混淆：WB_TOKEN 是 `eyJ...` 开头的 JWT，SERVERCHAN_KEY 是 `SCT` 开头的 SendKey。
 
 用法：
     python travel.py                # 巡检一轮
@@ -120,19 +123,60 @@ def try_payloads(token, path, payloads):
 
 # ---------------------------------------------------------------- 通知
 
-def notify(title, content):
-    key = os.environ.get("SERVERCHAN_KEY", "").strip()
+def sendkey_problem(key):
+    """检查 SERVERCHAN_KEY 的形态，返回问题描述；None 表示形态正常。
+
+    血泪教训：曾出现「SERVERCHAN_KEY 被填成 accessToken」的情况，推送失败被静默吞掉，
+    旅行一切正常但收不到微信。故改为显式回报推送结果。
+    """
     if not key:
-        return
+        return "未配置 SERVERCHAN_KEY（Secret 缺失或为空）"
+    if key.startswith("eyJ"):
+        return ("SERVERCHAN_KEY 疑似被填成了 accessToken（JWT）—— "
+                "WB_TOKEN 才填 eyJ 开头的令牌，SERVERCHAN_KEY 应为 SCT 开头的 SendKey")
+    if not key.upper().startswith("SCT"):
+        return "SERVERCHAN_KEY 不像 Server 酱 SendKey（应以 SCT 开头，实际前缀 %s...，共 %d 字符）" % (
+            key[:4], len(key))
+    return None
+
+
+def notify(title, content):
+    """Server 酱微信推送，返回结果字符串：ok: pushid=.. / skipped: <原因> / failed: .."""
+    key = os.environ.get("SERVERCHAN_KEY", "").strip()
+    problem = sendkey_problem(key)
+    if problem:
+        return "skipped: " + problem
     try:
         req = urllib.request.Request(
             "https://sctapi.ftqq.com/%s.send" % key,
             data=urllib.parse.urlencode({"title": title, "desp": content}).encode(),
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-        urllib.request.urlopen(req, timeout=15).read()
-    except Exception:
-        pass
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode("utf-8", "ignore"))
+    except urllib.error.HTTPError as err:
+        raw = err.read().decode("utf-8", "ignore")
+        # Server 酱的错误信息在 JSON body 里（如 [AUTH]错误的Key），解开转义更可读
+        try:
+            j = json.loads(raw)
+            return "failed: HTTP %s code=%s msg=%s" % (
+                err.code, j.get("code"), j.get("message") or j.get("info"))
+        except Exception:
+            return "failed: HTTP %s %s" % (err.code, raw[:180])
+    except Exception as err:
+        return "failed: %s: %s" % (type(err).__name__, err)
+    # Server 酱业务失败也可能回 HTTP 200，必须看 body 的 code
+    if body.get("code") == 0:
+        return "ok: pushid=%s" % ((body.get("data") or {}).get("pushid"))
+    return "failed: code=%s msg=%s" % (body.get("code"), body.get("message"))
+
+
+def report_push(status):
+    """把推送结果打到日志；CI 下额外发 GitHub 注解，使失败在 run 摘要可见。"""
+    print("[push] %s" % status)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        level = "notice" if status.startswith("ok:") else "warning"
+        print("::%s::Server Chan push -> %s" % (level, status.replace("\n", " ")))
 
 
 # 推送级别（环境变量 PUSH_LEVEL）：
@@ -202,9 +246,12 @@ def build_body(result):
 
 
 def emit(result):
+    notify_it = should_push(result)
+    if notify_it:
+        result["push"] = notify(build_title(result), build_body(result))
     print(json.dumps(result, ensure_ascii=False))
-    if should_push(result):
-        notify(build_title(result), build_body(result))
+    if notify_it:
+        report_push(result["push"])
 
 
 # ---------------------------------------------------------------- 主流程
