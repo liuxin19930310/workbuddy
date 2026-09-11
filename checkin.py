@@ -11,8 +11,9 @@
      macOS:   ~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info
 
 可选：设置 SERVERCHAN_KEY 后，结果会推送到微信（Server 酱）。
-    推送策略：只在「领取成功（claimed）」或「出错（error）」时推送。
-    每天 5 个触发时点里有 4 次是 skip（今日已领），推它们纯属骚扰，因此静默。
+    推送级别由 PUSH_LEVEL 控制：
+      all    = 每次巡检都推送（默认）
+      action = 只在「领取成功（claimed）」或「出错（error）」时推送
     调试：设置 FORCE_NOTIFY=1（Actions 手动触发时可勾选 force_notify）强制推一条，
     用于验证 SERVERCHAN_KEY 配置是否正确。
 
@@ -111,11 +112,13 @@ def is_forced():
 def build_title(result):
     prefix = "（测试）" if is_forced() else ""
     if result.get("status") == "error":
-        return prefix + "WorkBuddy 签到异常，需要处理"
+        return prefix + "签到异常，需要处理"
     if result.get("action") == "claimed":
         credit = result.get("credit")
-        return prefix + "WorkBuddy 签到成功 +%s 积分" % (credit if credit is not None else "?")
-    return prefix + "WorkBuddy 签到"
+        return prefix + "签到成功 +%s 积分" % (credit if credit is not None else "?")
+    if result.get("action") == "skip_already_signed":
+        return prefix + "签到巡检 · 今日已签到"
+    return prefix + "签到巡检"
 
 
 def build_body(result):
@@ -140,15 +143,20 @@ def build_body(result):
     return "\n".join(lines)
 
 
-# 推送策略：只在「真正领到积分」或「出错」时推送。
-# 每天有 5 个触发时点，其中 4 次是 skip（今日已领），推它们纯属骚扰。
+# 推送级别（环境变量 PUSH_LEVEL）：
+#   all    = 每次巡检都推送（默认；用户要求「巡检结果也推送到 Server 酱」）
+#           每天 5 个触发时点，其中 4 次是 skip（今日已领），会各推一条巡检结果
+#   action = 只在「真正领到积分」或「出错」时推送（安静模式，每天最多 1 条）
 PUSH_ACTIONS = ("claimed",)
+PUSH_LEVEL = os.environ.get("PUSH_LEVEL", "all").strip().lower()
 
 
 def should_push(result):
     if is_forced():
         return True
     if result.get("status") == "error":
+        return True
+    if PUSH_LEVEL == "all":
         return True
     return result.get("action") in PUSH_ACTIONS
 

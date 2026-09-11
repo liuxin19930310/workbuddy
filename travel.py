@@ -17,7 +17,10 @@
     WB_TOKEN   accessToken（必填，与 checkin.py 共用同一个 Secret）
     未设置时自动读取本机 WorkBuddy 登录态文件（便于本地调试）。
 
-可选：SERVERCHAN_KEY 设置后，派出/领取/出错会推微信。
+可选：SERVERCHAN_KEY 设置后，结果会推送到微信（Server 酱）。
+    推送级别由 PUSH_LEVEL 控制：
+      all    = 每次巡检都推送（默认，含「旅行中」「额度已用尽」等巡检结果）
+      action = 只在「派出成功 / 领取成功 / 出错」时推送
 
 用法：
     python travel.py                # 巡检一轮
@@ -132,40 +135,65 @@ def notify(title, content):
         pass
 
 
-# 只在「派出成功 / 领取成功 / 出错」时推送；traveling 与已达上限的空跑静默
+# 推送级别（环境变量 PUSH_LEVEL）：
+#   all    = 每次巡检都推送（默认；用户要求「巡检结果也推送到 Server 酱」）
+#   action = 仅在派出 / 领取 / 出错时推送（安静模式，正常每天最多 2 条）
 PUSH_ACTIONS = ("departed", "claimed")
+PUSH_LEVEL = os.environ.get("PUSH_LEVEL", "all").strip().lower()
 
 
 def should_push(result):
     if result.get("status") == "error":
         return True
+    if PUSH_LEVEL == "all":
+        return True
     return result.get("action") in PUSH_ACTIONS
+
+
+def fmt_remain(minutes):
+    minutes = int(minutes)
+    if minutes >= 60:
+        return "%d 小时 %d 分" % (minutes // 60, minutes % 60)
+    return "%d 分钟" % minutes
 
 
 def build_title(result):
     a = result.get("action")
     if result.get("status") == "error":
-        return "WorkBuddy 猫猫旅行异常，需要处理"
+        return "猫猫旅行异常，需要处理"
     if a == "claimed":
         return "猫猫旅行归来 +%s 积分" % result.get("reward_credit", "?")
     if a == "departed":
         return "猫猫已出发 · %s" % result.get("location", "")
-    return "WorkBuddy 猫猫旅行"
+    if a == "skip_traveling":
+        rm = result.get("remain_minutes")
+        if rm and rm > 0:
+            return "猫猫巡检 · 旅行中（还有 %s）" % fmt_remain(rm)
+        return "猫猫巡检 · 旅行中"
+    if a == "skip_daily_limit":
+        return "猫猫巡检 · 今日已完成"
+    if a == "none":
+        return "猫猫巡检 · 只读查询"
+    return "猫猫巡检"
 
 
 def build_body(result):
     lines = ["时间：%s" % result.get("time", ""),
              "状态：%s" % result.get("state", "-")]
-    if result.get("action"):
+    # 出错时 action 也可能是 "none"，此时不列动作，只给原因，避免误显成 dry-run
+    if result.get("action") and result.get("status") != "error":
         lines.append("动作：%s" % {
             "departed": "派出旅行", "claimed": "领取奖励",
             "skip_traveling": "旅行中，等待归来",
             "skip_daily_limit": "今日额度已用尽，跳过",
+            "none": "只读查询（dry-run）",
         }.get(result["action"], result["action"]))
     if result.get("location"):
         lines.append("地点：%s" % result["location"])
     if result.get("reward_credit"):
         lines.append("本次积分：+%s" % result["reward_credit"])
+    if result.get("remain_minutes"):
+        lines.append("剩余时间：约 %s" % fmt_remain(result["remain_minutes"]))
     if result.get("arrive_at"):
         lines.append("预计归来：%s" % result["arrive_at"])
     if result.get("status") == "error" and result.get("msg"):
@@ -223,9 +251,15 @@ def main():
     record_id = d.get("record_id") or 0
     loc_name = (d.get("location") or {}).get("name")
     arrive_at = fmt_ts(d.get("arrive_at"))
+    # 剩余时间（分钟）：用服务端时间算，避免本机时钟偏差
+    remain_minutes = None
+    if d.get("arrive_at") and d.get("server_now"):
+        remain_minutes = max(0, int((int(d["arrive_at"]) - int(d["server_now"])) // 60))
     base = {"time": now_cn(), "state": state, "source": source,
             "daily_limit_reached": limit, "record_id": record_id,
             "location": loc_name, "arrive_at": arrive_at}
+    if remain_minutes:
+        base["remain_minutes"] = remain_minutes
 
     if args.dry_run:
         emit(dict(base, status="ok", action="none", msg="dry-run：仅查询"))
