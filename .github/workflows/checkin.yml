@@ -7,6 +7,11 @@ on:
     # 多时点触发 + 幂等逻辑：任一时刻成功领取即可，不会重复领分
     - cron: '0 1,4,7,10,13 * * *'
   workflow_dispatch:
+    inputs:
+      force_notify:
+        description: '强制推送一条微信通知（用于验证 SERVERCHAN_KEY 配置是否正确）'
+        type: boolean
+        default: false
 
 # contents: write 供「每月心跳提交」步骤使用，用于防止 GitHub 在仓库长期无提交时停用定时任务
 permissions:
@@ -36,6 +41,8 @@ jobs:
           WB_DOMAIN: www.codebuddy.cn
           # 可选：填 Server 酱 SendKey 可推送微信；不需要则删除下面这行
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          # 手动触发时勾选 force_notify=true，可强制推一条，用于验证推送配置
+          FORCE_NOTIFY: ${{ inputs.force_notify }}
         run: python checkin.py
 
       # 本仓库只承载这一个自动化，长期无提交会被 GitHub 自动停用定时任务。

@@ -13,6 +13,8 @@
 可选：设置 SERVERCHAN_KEY 后，结果会推送到微信（Server 酱）。
     推送策略：只在「领取成功（claimed）」或「出错（error）」时推送。
     每天 5 个触发时点里有 4 次是 skip（今日已领），推它们纯属骚扰，因此静默。
+    调试：设置 FORCE_NOTIFY=1（Actions 手动触发时可勾选 force_notify）强制推一条，
+    用于验证 SERVERCHAN_KEY 配置是否正确。
 
 退出码：0 = 签到成功或今日已签到；1 = 失败（令牌失效 / 网络异常 / 未知错误）
 安全约定：全程不打印、不落盘任何令牌内容。
@@ -101,13 +103,19 @@ def notify(title, content):
         pass
 
 
+def is_forced():
+    """手动触发时勾选 force_notify，强制推送一条，用于验证 SERVERCHAN_KEY 配置。"""
+    return os.environ.get("FORCE_NOTIFY", "").strip().lower() in ("1", "true", "yes")
+
+
 def build_title(result):
+    prefix = "（测试）" if is_forced() else ""
     if result.get("status") == "error":
-        return "WorkBuddy 签到异常，需要处理"
+        return prefix + "WorkBuddy 签到异常，需要处理"
     if result.get("action") == "claimed":
         credit = result.get("credit")
-        return "WorkBuddy 签到成功 +%s 积分" % (credit if credit is not None else "?")
-    return "WorkBuddy 签到"
+        return prefix + "WorkBuddy 签到成功 +%s 积分" % (credit if credit is not None else "?")
+    return prefix + "WorkBuddy 签到"
 
 
 def build_body(result):
@@ -138,6 +146,8 @@ PUSH_ACTIONS = ("claimed",)
 
 
 def should_push(result):
+    if is_forced():
+        return True
     if result.get("status") == "error":
         return True
     return result.get("action") in PUSH_ACTIONS

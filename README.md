@@ -138,6 +138,18 @@ GitHub Actions 的 cron 使用 **UTC 时间**：
 > 注意：`SERVERCHAN_KEY` 未配置时，`notify()` 直接返回，脚本行为完全不受影响。
 > 另：令牌失效期间**每个触发时点都会推一条错误通知**（每天最多 5 条），这是刻意的——强提示你去更新令牌，修好即停。
 
+### 当场验证配置（不用等到明天）
+
+因为 skip 是静默的，正常手动触发**不会**产生推送，无法验证 `SERVERCHAN_KEY` 是否配对。为此 workflow 提供了一个测试开关：
+
+1. `Actions → WorkBuddy Daily Checkin → Run workflow`
+2. 把 **`force_notify`** 勾上（改为 true），再点 `Run workflow`
+3. 几秒后微信应收到一条标题为 **`（测试）WorkBuddy 签到`** 的消息
+
+收到 ⇒ `SERVERCHAN_KEY` 配置正确、通道可用。没收到 ⇒ SendKey 填错或未创建该 Secret（脚本对推送失败是静默的，不会让 job 变红）。
+
+不勾选 `force_notify` 时，一切恢复默认按需策略（每天最多 1 条）。
+
 ---
 
 ## 六、本机使用（可选）
