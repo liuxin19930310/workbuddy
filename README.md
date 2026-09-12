@@ -9,6 +9,24 @@
 | **Buddy 加油站签到** | `checkin.py` | `checkin.yml` | 每日领取签到积分（+100，连签有额外奖励） |
 | **派猫猫旅行** | `travel.py` | `travel.yml` | 派出猫猫旅行 → 归来后自动领取 5~10 积分（每日闭环） |
 
+> ## ⚠️ 本仓库必须保持 public，不要改回私有
+>
+> **原因**：免费个人账号下，**私有仓库的 `schedule` 定时事件不会触发**（社区实证；官方文档只写了免费计划私有仓 2000 分钟/月，未记载这条限制）。
+>
+> **判定签名**（一眼可辨，2026-09-12 实测于本仓）：
+> - Actions 页只有手动运行记录，**零条 `schedule` 运行**；
+> - 工作流详情页横幅只写 *"This workflow has a `workflow_dispatch` event trigger."*，**完全不提 `schedule`**；
+> - 而配置怎么查都没问题：令牌有效、默认分支正确、YAML 无 TAB、`on: schedule` 齐全、手动运行能成功。
+>
+> 私有期间，08:15 与 09:00 两个定时点均未产生任何运行记录；改为 public 后定时恢复。
+>
+> **若确实必须私有**（两条替代路径）：
+> 1. 升级 GitHub Pro（$4/月）—— 官方支持私有仓定时；
+> 2. 外部定时器（cron-job.org 等）带 fine-grained PAT（`Actions: write`）调 `workflow_dispatch` 接口：
+>    `curl -X POST -H "Authorization: Bearer <PAT>" https://api.github.com/repos/<owner>/<repo>/actions/workflows/checkin.yml/dispatches -d '{"ref":"main"}'`
+>
+> 附带好处：public 仓的标准 runner Actions 分钟**免费且不限量**（私有仓才有 2000 分钟/月上限）。
+
 ---
 
 # 第一部分：Buddy 加油站签到
@@ -106,8 +124,8 @@ GitHub Actions 的 cron 使用 **UTC 时间**：
 2. **仓库保活已内置**
    workflow 里带了「每月心跳提交」步骤：每月首次运行时自动提交一次 `.keepalive/last-heartbeat.txt`，使仓库始终有活动，避免 GitHub 在 60 天无提交时自动停用定时任务。该步骤 `continue-on-error`，即使推送失败也不影响签到结果。
 
-3. **额度**
-   私有仓 Free 账户约 2000 分钟/月；本任务每次约 1 分钟、每天 5 次，约 150 分钟/月。
+3. **Actions 额度**
+   本仓为 **public**，标准 runner 的 Actions 分钟**免费且不限量**（私有仓才有 2000 分钟/月上限）。本任务约 150 分钟/月，压力可忽略。
 
 4. **合规**
    调用的是你自己的账号接口，属个人自动化。若官方调整接口或规则，以官方说明为准；接口路径若变化，只需修改 `checkin.py` 顶部常量。
