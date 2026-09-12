@@ -1,5 +1,10 @@
 name: WorkBuddy Daily Checkin
 
+# 🚨 部署前必读：免费个人账号下，**私有仓库的 schedule 事件不会触发**（官方文档未记载）。
+#    本仓库必须是 public（或账号有 GitHub Pro），否则下面这些 cron 一次都不会跑。
+#    判定：Actions 页只有手动运行记录、零条 schedule 运行；工作流页横幅只提 workflow_dispatch。
+#    详见 SKILL.md 的「🚨 头号坑」。
+
 on:
   schedule:
     # GitHub Actions 的 cron 使用 UTC，北京时间 = UTC + 8
@@ -13,7 +18,7 @@ on:
         type: boolean
         default: false
 
-# contents: write 供「每月心跳提交」步骤使用，用于防止 GitHub 在仓库长期无提交时停用定时任务
+# contents: write 供「每日运行戳」步骤提交使用（证明定时触发确实发生了，兼做保活）
 permissions:
   contents: write
 
@@ -39,12 +44,18 @@ jobs:
         env:
           WB_TOKEN: ${{ secrets.WB_TOKEN }}
           WB_DOMAIN: www.codebuddy.cn
-          # 可选：填 Server 酱 SendKey 可推送微信；不需要则删除下面这行
+          # 推送渠道：serverchan = 微信（Server 酱；免费额度仅约 5 条/天，不宜配 all）
+          #           bark       = iPhone 原生通知（无条数限制，推荐）
+          # 不设本项时默认 serverchan —— 既有部署无需改动
+          NOTIFY_CHANNEL: serverchan
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
-          # 推送级别：action = 只在领取成功 / 出错时推（当前设置，每天最多 1 条，
-          #            即「签到成功 +100 积分」；「今日已签到」这类巡检不推）
-          #           all    = 每次巡检都推（每天 5 条，含无动作的巡检结果）
-          # 注：降频到 action 后每天 ≤1 条，也顺带避开了 Server 酱免费版约 5 条/天的额度上限
+          # 改用 Bark：NOTIFY_CHANNEL 改成 bark，并加一行
+          #   BARK_KEY: ${{ secrets.BARK_KEY }}
+          # （BARK_KEY 可填 App 首页那串 key，或整条测试 URL；另有 BARK_SERVER / BARK_GROUP / BARK_LEVEL 可选）
+          # 推送级别：action = 只在领取成功 / 出错时推（默认，每天最多 1 条）
+          #           all    = 每次巡检都推（含「今日已签到」这类无动作结果，每天 5 条）
+          #           off    = 本仓不推送（什么都不推，也不产生告警注解）
+          # 关掉推送：本行改为 off，并顺手删掉上面的密钥行
           PUSH_LEVEL: action
           # 手动触发时勾选 force_notify=true，可强制推一条，用于验证推送配置。
           # 用 github.event.inputs 而非 inputs：inputs 上下文仅在 workflow_dispatch /
@@ -53,28 +64,42 @@ jobs:
           FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}
         run: python checkin.py
 
-      # 本仓库只承载这一个自动化，长期无提交会被 GitHub 自动停用定时任务。
-      # 该步骤每月写入一次心跳文件并提交，确保仓库始终有活动；失败不影响签到结果。
+      # 每日「运行戳」：每天第一次成功运行时写入并提交一个带时间戳的文件。
       #
-      # 注意：schedule / workflow_dispatch 触发的运行，actions/checkout 会以 detached HEAD
-      # 检出提交，此时裸 `git push` 会报 "You are not currently on a branch" 而静默失败
-      # （本步骤是 continue-on-error，不会让 job 变红，所以必须显式指定目标分支）。
-      - name: Keep repository active (monthly heartbeat commit)
+      # 为什么要每天（而不是每月）：GitHub 的 schedule 是「尽力而为」的，可能延迟甚至整次跳过；
+      # 而本自动化没有别的远端副作用，导致「今天到底跑没跑」从外部无法判断。
+      # 现在：有提交 = 定时在跑；戳的日期变旧 = 定时没触发 —— 不需要任何 API 的硬证据。
+      # 两个 workflow 用**独立文件**，否则先跑的会挡住后跑的（travel 08:15 早于 checkin 09:00）。
+      #
+      # 门控规则：今天已由【定时】戳过 → 跳过；只被【手动】戳过 → 手动不占名额，等定时来覆盖；
+      # 已被手动戳过且本次也是手动 → 跳过（避免连点刷提交）。
+      #
+      # 注意：schedule / workflow_dispatch 触发时 actions/checkout 处于 detached HEAD，
+      # 裸 `git push` 会报 "You are not currently on a branch" 而静默失败
+      # （本步骤是 continue-on-error，不会让 job 变红），所以必须显式写 HEAD:main。
+      - name: Daily run stamp (proves the scheduled trigger fired)
         continue-on-error: true
         env:
           TZ: Asia/Shanghai
         run: |
           set -e
           mkdir -p .keepalive
-          STAMP=".keepalive/last-heartbeat.txt"
-          THIS_MONTH="$(date +%Y-%m)"
-          if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$THIS_MONTH" ]; then
-            echo "Heartbeat already updated this month: $THIS_MONTH"
-            exit 0
+          STAMP=".keepalive/last-run-checkin.txt"
+          TODAY="$(date +%Y-%m-%d)"
+          EVENT="${GITHUB_EVENT_NAME}"
+          if [ -f "$STAMP" ] && [ "$(cut -d' ' -f1 "$STAMP")" = "$TODAY" ]; then
+            if grep -q "event=schedule" "$STAMP"; then
+              echo "Already stamped today by a scheduled run: $TODAY"
+              exit 0
+            fi
+            if [ "$EVENT" != "schedule" ]; then
+              echo "Stamped today by a non-scheduled run; waiting for a scheduled run to overwrite: $TODAY"
+              exit 0
+            fi
           fi
-          echo "$THIS_MONTH" > "$STAMP"
+          echo "$(date '+%Y-%m-%d %H:%M:%S %z') checkin event=${EVENT}" > "$STAMP"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$STAMP"
-          git commit -m "chore: monthly heartbeat ${THIS_MONTH}"
+          git commit -m "chore: daily run stamp ${TODAY} (checkin)"
           git push origin HEAD:main

@@ -10,16 +10,24 @@
      Windows: %LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth\\workbuddy-desktop.info
      macOS:   ~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info
 
-可选：设置 SERVERCHAN_KEY 后，结果会推送到微信（Server 酱）。
+可选：设置 NOTIFY_CHANNEL 后，结果会推送到手机。当前支持：
+      bark       = Bark（iPhone 原生通知，走 APNs，无条数限制）
+                   密钥放 BARK_KEY（App 首页那串 key，或整条测试 URL 均可）
+                   可选 BARK_SERVER（自建域名）、BARK_GROUP、BARK_LEVEL
+      serverchan = Server 酱（微信），密钥放 SERVERCHAN_KEY
+                   ⚠️ 免费额度只有约 5 条/天，不适合 PUSH_LEVEL=all
+    未设置 NOTIFY_CHANNEL 时默认 serverchan（向后兼容既有部署）。
+
     推送级别由 PUSH_LEVEL 控制：
       all    = 每次巡检都推送（默认）
       action = 只在「领取成功（claimed）」或「出错（error）」时推送
+      off    = 本仓彻底关闭推送（无推送、无告警噪音）
     推送结果会写回结果 JSON 的 push 字段并打印（CI 下额外输出 GitHub 注解），
-    因此 SendKey 填错/未配置时不再静默 —— 排查推送问题先看这一行。
+    因此密钥填错/未配置时不再静默 —— 排查推送问题先看这一行。
     ⚠️ 易混淆：WB_TOKEN 是 `eyJ...` 开头的 JWT（1000+ 字符），
-       SERVERCHAN_KEY 是 `SCT` 开头的 SendKey（约 32 字符），两者不能互换。
+       各类推送密钥都不是它，填错会被形态检查当场指出。
     调试：设置 FORCE_NOTIFY=1（Actions 手动触发时可勾选 force_notify）强制推一条，
-    用于验证 SERVERCHAN_KEY 配置是否正确。
+    用于验证推送配置是否正确。
 
 退出码：0 = 签到成功或今日已签到；1 = 失败（令牌失效 / 网络异常 / 未知错误）
 安全约定：全程不打印、不落盘任何令牌内容。
@@ -27,6 +35,7 @@
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -109,49 +118,126 @@ def sendkey_problem(key):
     return None
 
 
-def notify(title, content):
-    """Server 酱微信推送，**返回结果字符串**（不再返回值恒为 None 的静默实现）。
+DEFAULT_BARK_SERVER = "https://api.day.app"
+NOTIFY_CHANNEL = os.environ.get("NOTIFY_CHANNEL", "serverchan").strip().lower()
 
-    返回形态：
-      ok: pushid=<id>       推送成功
-      skipped: <原因>        未推送（未配置 / 形态明显不对），原因即诊断结论
-      failed: ...           已发起但失败（HTTP 错误 / 业务 code 非 0）
+
+def _bark_target():
+    """从 BARK_KEY 解析出 (server, key, 问题)；支持纯 key、App 首页整条测试 URL、自建域名。
+
+    Bark App 首页给的是「https://api.day.app/<key>/推送内容」这种整条 URL，用户往往整条复制，
+    所以这里兼容 URL 形态，并顺带取出服务器地址（自建时 URL 里就是自己的域名）。
     """
+    raw = os.environ.get("BARK_KEY", "").strip()
+    if not raw:
+        return None, None, "未配置 BARK_KEY（Secret 缺失或为空）"
+    server = os.environ.get("BARK_SERVER", "").strip() or DEFAULT_BARK_SERVER
+    key = raw
+    if raw[:7] == "http://" or raw[:8] == "https://":
+        parsed = urllib.parse.urlparse(raw)
+        segs = [s for s in parsed.path.split("/") if s]
+        if not segs:
+            return None, None, "BARK_KEY 是 URL 但解析不出 key（应为 /<key>/… 形式）"
+        server, key = "%s://%s" % (parsed.scheme, parsed.netloc), segs[0]
+    if key.startswith("eyJ"):
+        return None, None, ("BARK_KEY 疑似被填成了 accessToken（JWT）—— "
+                            "WB_TOKEN 才填 eyJ 开头的令牌，BARK_KEY 应是 App 首页那串 key")
+    if key.upper().startswith("SCT"):
+        return None, None, ("BARK_KEY 疑似填成了 Server 酱 SendKey（SCT 开头）—— "
+                            "Bark 用的是 App 首页那串 key（或整条测试 URL）")
+    if len(key) < 12 or not re.fullmatch(r"[A-Za-z0-9_\-]+", key):
+        return None, None, "BARK_KEY 形态不对（应为 App 首页的 key 或整条测试 URL；当前长度 %d）" % len(key)
+    return server, key, None
+
+
+def _send_serverchan(title, content):
+    """Server 酱（sct.ftqq.com）。注意免费额度只有约 5 条/天，不适合 PUSH_LEVEL=all。"""
     key = os.environ.get("SERVERCHAN_KEY", "").strip()
     problem = sendkey_problem(key)
     if problem:
         return "skipped: " + problem
-    try:
-        req = urllib.request.Request(
-            "https://sctapi.ftqq.com/%s.send" % key,
-            data=urllib.parse.urlencode({"title": title, "desp": content}).encode(),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read().decode("utf-8", "ignore"))
-    except urllib.error.HTTPError as err:
-        raw = err.read().decode("utf-8", "ignore")
-        # Server 酱的错误信息在 JSON body 里（如 [AUTH]错误的Key），解开转义更可读
-        try:
-            j = json.loads(raw)
-            return "failed: HTTP %s code=%s msg=%s" % (
-                err.code, j.get("code"), j.get("message") or j.get("info"))
-        except Exception:
-            return "failed: HTTP %s %s" % (err.code, raw[:180])
-    except Exception as err:
-        return "failed: %s: %s" % (type(err).__name__, err)
+    req = urllib.request.Request(
+        "https://sctapi.ftqq.com/%s.send" % key,
+        data=urllib.parse.urlencode({"title": title, "desp": content}).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        body = json.loads(resp.read().decode("utf-8", "ignore"))
     # Server 酱在业务失败时也可能返回 HTTP 200，必须看 body 里的 code
     if body.get("code") == 0:
         return "ok: pushid=%s" % ((body.get("data") or {}).get("pushid"))
     return "failed: code=%s msg=%s" % (body.get("code"), body.get("message"))
 
 
+def _send_bark(title, content):
+    """Bark（iOS 原生通知，走 APNs）。无条数限制，只需 App 首页那串 key。"""
+    server, key, problem = _bark_target()
+    if problem:
+        return "skipped: " + problem
+    payload = {
+        "title": title,
+        "body": content,
+        "group": os.environ.get("BARK_GROUP", "workbuddy").strip() or "workbuddy",
+        # active(默认) / timeSensitive(可突破专注模式) / critical(静音也响) / passive
+        "level": os.environ.get("BARK_LEVEL", "active").strip() or "active",
+    }
+    req = urllib.request.Request(
+        # 用 API v1 的 POST /<key>（兼容性最好）；不采用 /push，那是较新服务端才有的形态
+        "%s/%s" % (server.rstrip("/"), key),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        body = json.loads(resp.read().decode("utf-8", "ignore"))
+    if body.get("code") == 200:
+        return "ok: code=200"
+    return "failed: code=%s msg=%s" % (body.get("code"), body.get("message"))
+
+
+# 通知后端表：加渠道只需在这里加一行。约定 —— 入参 (title, content)，返回结果字符串，
+# 异常直接抛出交给 notify() 统一兜（这样各后端不必各写一遍 try/except）。
+CHANNELS = {
+    "serverchan": _send_serverchan,
+    "bark": _send_bark,
+}
+
+
+def notify(title, content):
+    """按 NOTIFY_CHANNEL 分发推送，**返回结果字符串**（不存在静默吞异常的版本）。
+
+    返回形态（始终带渠道标签）：
+      ok: [bark] code=200        推送成功
+      skipped: [bark] <原因>      未推送（未配置 / 形态明显不对），原因即诊断结论
+      failed: [bark] ...         已发起但失败（HTTP 错误 / 业务 code 非预期）
+    """
+    sender = CHANNELS.get(NOTIFY_CHANNEL)
+    if sender is None:
+        return "skipped: [%s] 未知渠道（NOTIFY_CHANNEL 可用值：%s）" % (
+            NOTIFY_CHANNEL, " / ".join(sorted(CHANNELS)))
+    try:
+        status = sender(title, content)
+    except urllib.error.HTTPError as err:
+        raw = err.read().decode("utf-8", "ignore")
+        # 各家错误信息都在 JSON body 里（如 Server 酱的 [AUTH]错误的Key），解开转义更可读
+        try:
+            j = json.loads(raw)
+            status = "failed: HTTP %s code=%s msg=%s" % (
+                err.code, j.get("code"), j.get("message") or j.get("info"))
+        except Exception:
+            status = "failed: HTTP %s %s" % (err.code, raw[:180])
+    except Exception as err:
+        status = "failed: %s: %s" % (type(err).__name__, err)
+    head, _, rest = status.partition(": ")
+    return "%s: [%s] %s" % (head, NOTIFY_CHANNEL, rest)
+
+
 def report_push(status):
     """把推送结果打到日志；CI 下额外发 GitHub 注解，使失败在 run 摘要可见。"""
     print("[push] %s" % status)
     if os.environ.get("GITHUB_ACTIONS") == "true":
-        level = "notice" if status.startswith("ok:") else "warning"
-        print("::%s::Server Chan push -> %s" % (level, status.replace("\n", " ")))
+        level = "notice" if status.startswith("ok") else "warning"
+        print("::%s::notify(%s) -> %s" % (level, NOTIFY_CHANNEL, status.replace("\n", " ")))
 
 
 def is_forced():
@@ -197,13 +283,19 @@ def build_body(result):
 #   all    = 每次巡检都推送（默认；用户要求「巡检结果也推送到 Server 酱」）
 #           每天 5 个触发时点，其中 4 次是 skip（今日已领），会各推一条巡检结果
 #   action = 只在「真正领到积分」或「出错」时推送（安静模式，每天最多 1 条）
+#   off    = 本仓彻底关闭推送（什么都不推、也不输出告警注解）。
+#           给「不想要微信推送」的仓库用：比删掉 SERVERCHAN_KEY 更干净 ——
+#           删密钥会让每次运行都出现 skipped/告警噪音，off 则完全静默。
 PUSH_ACTIONS = ("claimed",)
 PUSH_LEVEL = os.environ.get("PUSH_LEVEL", "all").strip().lower()
 
 
 def should_push(result):
+    # 手动强制推送优先保留，便于将来重新启用推送时仍能一次验证通断
     if is_forced():
         return True
+    if PUSH_LEVEL == "off":
+        return False
     if result.get("status") == "error":
         return True
     if PUSH_LEVEL == "all":
@@ -215,10 +307,10 @@ def emit(result, notify_it=None):
     if notify_it is None:
         notify_it = should_push(result)
     if notify_it:
-        # 先算好正文（不含 push 字段，避免自引用），再把推送结果并入结果 JSON
-        result["push"] = notify(
-            build_title(result),
-            build_body(result) + "\n\n原始输出：" + json.dumps(result, ensure_ascii=False))
+        # 正文只给结论（时间 / 结果 / 本次积分 / 连续天数，出错时附原因）。
+        # 完整的原始 JSON 与推送结果留在 stdout 与 [push] 日志行里 ——
+        # 手机通知保持清爽，排错能力不损失。
+        result["push"] = notify(build_title(result), build_body(result))
     print(json.dumps(result, ensure_ascii=False))
     if notify_it:
         report_push(result["push"])

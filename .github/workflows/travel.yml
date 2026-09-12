@@ -1,5 +1,9 @@
 name: WorkBuddy Cat Travel
 
+# 🚨 部署前必读：免费个人账号下，**私有仓库的 schedule 事件不会触发**（官方文档未记载）。
+#    本仓库必须是 public（或账号有 GitHub Pro），否则下面这些 cron 一次都不会跑。
+#    详见 SKILL.md 的「🚨 头号坑」。
+
 on:
   schedule:
     # GitHub Actions 的 cron 使用 UTC，北京时间 = UTC + 8
@@ -21,9 +25,14 @@ on:
         description: '指定地点：1咖啡馆 2商场店铺 3健身房 4古镇客栈，0=随机'
         type: string
         default: '0'
+      force_notify:
+        description: '强制推送一条通知（即使本次是"跳过"也推；标题带「（测试）」前缀，用于验证推送配置）'
+        type: boolean
+        default: false
 
+# contents: write 供「每日运行戳」步骤提交使用（证明定时触发确实发生了）
 permissions:
-  contents: read
+  contents: write
 
 # 与签到任务相互独立，各自加锁即可
 concurrency:
@@ -43,18 +52,25 @@ jobs:
 
       - name: Run cat travel
         env:
-          # 与签到共用同一个令牌与推送密钥，无需额外配置
+          # 与签到共用同一个令牌，推送渠道与密钥也要与 checkin.yml 保持一致
           WB_TOKEN: ${{ secrets.WB_TOKEN }}
+          # 渠道见 checkin.yml 的说明；不设时默认 serverchan
+          NOTIFY_CHANNEL: serverchan
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
-          # 推送级别：action = 只在派出成功 / 领取成功 / 出错时推（当前设置，每天 ≤2 条，
-          #            即「猫猫已出发」与「猫猫旅行归来」；「旅行中」这类巡检不推）
-          #           all    = 每次巡检都推（每天 4 条，含无动作的巡检结果）
+          # 改用 Bark 时加：BARK_KEY: ${{ secrets.BARK_KEY }}
+          # 推送级别：action = 只在派出成功 / 领取成功 / 出错时推（默认，每天 ≤2 条）
+          #           all    = 每次巡检都推（含「旅行中」这类无动作结果，每天 4 条）
+          #           off    = 本仓不推送（什么都不推，也不产生告警注解）
+          # 关掉推送：本行改为 off，并顺手删掉上面的密钥行
           PUSH_LEVEL: action
           # 用 github.event.inputs 而非 inputs：inputs 上下文仅在 workflow_dispatch /
           # workflow_call 可用，定时(schedule)触发时其值为 null 且 inputs 段的 default 不生效。
           # github.event.inputs 在所有事件下都存在（非手动触发时为空），配合下方 shell 默认值最稳。
           DRY_RUN: ${{ github.event.inputs.dry_run }}
           LOCATION: ${{ github.event.inputs.location }}
+          # 手动触发时勾选 force_notify=true，强制推一条（本次是"跳过"也推），
+          # 标题带「（测试）」前缀 —— 这是旅行侧唯一的推送验证入口。
+          FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}
         run: |
           set -e
           ARGS=""
@@ -62,3 +78,40 @@ jobs:
           if [ -n "$LOCATION" ] && [ "$LOCATION" != "0" ]; then ARGS="$ARGS --location $LOCATION"; fi
           echo "python travel.py $ARGS"
           python travel.py $ARGS
+
+      # 每日「运行戳」：与 checkin.yml 同一机制，但用**独立文件**（否则两个 workflow 会互相挡住，
+      # travel 08:15 早于 checkin 09:00）。作用：证明 travel 的定时触发确实发生了，
+      # 且从戳上的时间可看出当天首个成功时点是几点 —— 若 08:15 漏了而 12:30 跑了，一眼可辨。
+      #
+      # 门控规则：今天已由【定时】戳过 → 跳过；只被【手动】戳过 → 手动不占名额，等定时来覆盖；
+      # 已被手动戳过且本次也是手动 → 跳过（避免连点刷提交）。
+      #
+      # 注意：schedule / workflow_dispatch 触发时 actions/checkout 处于 detached HEAD，
+      # 裸 `git push` 会报 "You are not currently on a branch" 而静默失败（本步骤是 continue-on-error，
+      # job 不会变红），所以必须显式写 HEAD:main。
+      - name: Daily run stamp (proves the scheduled trigger fired)
+        continue-on-error: true
+        env:
+          TZ: Asia/Shanghai
+        run: |
+          set -e
+          mkdir -p .keepalive
+          STAMP=".keepalive/last-run-travel.txt"
+          TODAY="$(date +%Y-%m-%d)"
+          EVENT="${GITHUB_EVENT_NAME}"
+          if [ -f "$STAMP" ] && [ "$(cut -d' ' -f1 "$STAMP")" = "$TODAY" ]; then
+            if grep -q "event=schedule" "$STAMP"; then
+              echo "Already stamped today by a scheduled run: $TODAY"
+              exit 0
+            fi
+            if [ "$EVENT" != "schedule" ]; then
+              echo "Stamped today by a non-scheduled run; waiting for a scheduled run to overwrite: $TODAY"
+              exit 0
+            fi
+          fi
+          echo "$(date '+%Y-%m-%d %H:%M:%S %z') travel event=${EVENT}" > "$STAMP"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$STAMP"
+          git commit -m "chore: daily run stamp ${TODAY} (travel)"
+          git push origin HEAD:main
