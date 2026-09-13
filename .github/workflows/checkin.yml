@@ -62,42 +62,63 @@ jobs:
           # workflow_call 可用，定时(schedule)触发时其值为 null 且 inputs 段的 default 不生效，
           # 而定时触发恰恰是本任务的主要运行方式。
           FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}
-        run: python checkin.py
+        id: run_checkin
+        run: |
+          # 输出落盘，供下一步的运行戳提取本次 action；最后以脚本自身的退出码结束本步骤，
+          # 所以加了这段逻辑也不会把脚本的失败吞成成功。
+          python checkin.py > "$RUNNER_TEMP/wb-checkin.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/wb-checkin.log"
+          ACTION="$(sed -n 's/.*"action": *"\([^"]*\)".*/\1/p' "$RUNNER_TEMP/wb-checkin.log" | head -1)"
+          echo "action=${ACTION:-unknown}" >> "$GITHUB_OUTPUT"
+          exit ${rc:-0}
 
-      # 每日「运行戳」：每天第一次成功运行时写入并提交一个带时间戳的文件。
+      # 每日「运行戳」：把当天「第一笔运行」和当天出现过的实质动作记录进一个文件并提交。
       #
-      # 为什么要每天（而不是每月）：GitHub 的 schedule 是「尽力而为」的，可能延迟甚至整次跳过；
-      # 而本自动化没有别的远端副作用，导致「今天到底跑没跑」从外部无法判断。
-      # 现在：有提交 = 定时在跑；戳的日期变旧 = 定时没触发 —— 不需要任何 API 的硬证据。
-      # 两个 workflow 用**独立文件**，否则先跑的会挡住后跑的（travel 08:15 早于 checkin 09:00）。
+      # 为什么需要它：积分到账在仓库里看不见，本自动化又没有别的远端副作用，
+      # 于是「今天到底跑没跑、被谁触发、结果是什么」从外部无从判断。这个文件就是
+      # **不需要任何 API 就能读的账本**：
+      #   有今天的戳   = 今天确实跑过
+      #   event=...    = 触发来源（schedule = GitHub 原生定时；workflow_dispatch = 外部定时器或手动）
+      #   action=...   = 本次结果（claimed / departed = 有实质动作；skip_* = 空跑；none / error = 异常）
       #
-      # 门控规则：今天已由【定时】戳过 → 跳过；只被【手动】戳过 → 手动不占名额，等定时来覆盖；
-      # 已被手动戳过且本次也是手动 → 跳过（避免连点刷提交）。
+      # 门控规则：
+      #   当天还没有戳                                → 写入（哪怕空跑或出错，先留下「跑过」的证据）
+      #   当天已有戳 + 本次是实质动作且与已记录的不同 → 覆盖（travel 当天会先 departed 后 claimed，各记一笔）
+      #   其余情况                                    → 保持原样
+      #
+      # 与旧版的区别：旧版是「schedule 覆盖一切」，目的是证明原生定时跑了；但主触发源改为
+      # 外部定时器后（走 workflow_dispatch），旧规则会把 00:05 的领取记录覆盖成 09:xx 的空跑，
+      # 反而掩盖真相。两个 workflow 仍各用独立文件，避免互相挡住。
       #
       # 注意：schedule / workflow_dispatch 触发时 actions/checkout 处于 detached HEAD，
       # 裸 `git push` 会报 "You are not currently on a branch" 而静默失败
       # （本步骤是 continue-on-error，不会让 job 变红），所以必须显式写 HEAD:main。
-      - name: Daily run stamp (proves the scheduled trigger fired)
+      - name: Daily run stamp (event + action ledger)
+        # if: always() —— 脚本报错时也要留下「今天跑过、结果是 error」的记录，
+        # 否则出错日反而毫无痕迹（旧版正是如此）。
+        if: always()
         continue-on-error: true
         env:
           TZ: Asia/Shanghai
+          ACTION: ${{ steps.run_checkin.outputs.action }}
         run: |
           set -e
           mkdir -p .keepalive
           STAMP=".keepalive/last-run-checkin.txt"
           TODAY="$(date +%Y-%m-%d)"
-          EVENT="${GITHUB_EVENT_NAME}"
           if [ -f "$STAMP" ] && [ "$(cut -d' ' -f1 "$STAMP")" = "$TODAY" ]; then
-            if grep -q "event=schedule" "$STAMP"; then
-              echo "Already stamped today by a scheduled run: $TODAY"
-              exit 0
-            fi
-            if [ "$EVENT" != "schedule" ]; then
-              echo "Stamped today by a non-scheduled run; waiting for a scheduled run to overwrite: $TODAY"
-              exit 0
-            fi
+            case "${ACTION}" in
+              claimed|departed)
+                if grep -q "action=${ACTION}" "$STAMP"; then
+                  echo "already recorded action=${ACTION} today:"; cat "$STAMP"; exit 0
+                fi
+                ;;
+              *)
+                echo "no new meaningful action (action=${ACTION}); keep:"; cat "$STAMP"; exit 0
+                ;;
+            esac
           fi
-          echo "$(date '+%Y-%m-%d %H:%M:%S %z') checkin event=${EVENT}" > "$STAMP"
+          echo "$(date '+%Y-%m-%d %H:%M:%S %z') checkin event=${GITHUB_EVENT_NAME} action=${ACTION:-unknown}" > "$STAMP"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$STAMP"

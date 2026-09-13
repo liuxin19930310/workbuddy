@@ -105,13 +105,30 @@ powershell -ExecutionPolicy Bypass -File .\get-token.ps1
 
 ## 三、调度说明
 
+### 主调度：外部定时器（时间可控）
+
+GitHub 原生 `schedule` 是 best-effort：实测延迟从 2 分钟到 **3 小时 08 分**不等，还出现过**整次丢弃**。
+所以真正负责「准时」的是一个外部定时器（cron-job.org），它在固定时刻调用 GitHub 的
+`workflow_dispatch` 接口来触发本工作流：
+
+| 时间（北京） | 动作 |
+|---|---|
+| **00:05** | 触发签到 —— 跨过零点即可领取，最稳，不会漏签 |
+| **08:00** | 触发猫猫出发 |
+| **12:30** | 触发猫猫归来领取（最慢的 4 小时行程也必然已归来） |
+
+配置方法（PAT 创建 / job 填写 / 验证）见 **[EXTERNAL-CRON.md](EXTERNAL-CRON.md)**。
+
+### 兜底：GitHub 原生 schedule
+
 GitHub Actions 的 cron 使用 **UTC 时间**：
 
 ```yaml
 - cron: '0 1,4,7,10,13 * * *'   # 北京时间 09:00 / 12:00 / 15:00 / 18:00 / 21:00
 ```
 
-多时点触发 + 幂等设计：任一时刻成功领取即可，不会重复领分，同时规避 GitHub 定时任务的偶发延迟。
+多时点触发 + 幂等设计：任一时刻成功领取即可，不会重复领分。
+**外部定时器失效时，由它保证「当天仍然领得到」** —— 两层调度互不冲突，同时触发也只领一次。
 
 ---
 
@@ -122,12 +139,18 @@ GitHub Actions 的 cron 使用 **UTC 时间**：
    → **建议每 1~2 个月重跑一次 `get-token.ps1` 更新 `WB_TOKEN`**。到期后脚本会输出 `status=error / 令牌已失效`，不会被误报成签到成功；配了 `SERVERCHAN_KEY` 时还会同时推微信提醒你。
 
 2. **仓库保活已内置**
-   workflow 里带了「每月心跳提交」步骤：每月首次运行时自动提交一次 `.keepalive/last-heartbeat.txt`，使仓库始终有活动，避免 GitHub 在 60 天无提交时自动停用定时任务。该步骤 `continue-on-error`，即使推送失败也不影响签到结果。
+   两个 workflow 末尾都有「每日运行戳」步骤：把当天第一笔运行写进 `.keepalive/last-run-*.txt` 并提交，
+   既让仓库始终有活动（避免 GitHub 在 60 天无提交时自动停用定时任务），
+   又留下了一份**不需要任何 API 就能读的运行账本**。该步骤 `continue-on-error`，推送失败也不影响领取结果。
 
-3. **Actions 额度**
+3. **外部定时器的 PAT 也会过期**
+   cron-job.org 用的 GitHub PAT 最长有效期 1 年，到期后 6 个 job 会全部返回 401。
+   重建令牌并更新 job 的 `Authorization` 头即可，步骤见 [EXTERNAL-CRON.md](EXTERNAL-CRON.md) 第六节。
+
+4. **Actions 额度**
    本仓为 **public**，标准 runner 的 Actions 分钟**免费且不限量**（私有仓才有 2000 分钟/月上限）。本任务约 150 分钟/月，压力可忽略。
 
-4. **合规**
+5. **合规**
    调用的是你自己的账号接口，属个人自动化。若官方调整接口或规则，以官方说明为准；接口路径若变化，只需修改 `checkin.py` 顶部常量。
 
 ---
@@ -295,10 +318,11 @@ python travel.py --location 1   # 指定咖啡馆
 |---|---|
 | `checkin.py` | 签到主脚本。零第三方依赖（仅标准库），幂等、令牌全脱敏、`PUSH_LEVEL` 可调推送级别；本地/CI 双模式 |
 | `travel.py` | 派猫猫旅行闭环脚本。状态机 + 幂等，纯标准库，令牌全脱敏，`PUSH_LEVEL` 可调；本地/CI 双模式 |
-| `.github/workflows/checkin.yml` | 签到定时任务（UTC cron、手动触发、并发保护、月度心跳保活、Node 24 版 action） |
-| `.github/workflows/travel.yml` | 猫猫旅行定时任务（4 个时点巡检、支持 dry_run 与指定地点） |
+| `.github/workflows/checkin.yml` | 签到任务（外部定时器 + 原生 cron 兜底、手动触发、并发保护、每日运行戳、Node 24 版 action） |
+| `.github/workflows/travel.yml` | 猫猫旅行任务（外部定时器 + 4 个时点兜底巡检、支持 dry_run 与指定地点） |
+| `EXTERNAL-CRON.md` | **外部定时器部署手册**：cron-job.org 配置、GitHub PAT 创建、验证方法与维护须知 |
 | `get-token.ps1` | 提取本机 accessToken 到剪贴板，只打印脱敏预览与到期时间 |
 
 > 两个自动化共用 Secret：`WB_TOKEN`（令牌）、`SERVERCHAN_KEY`（可选，微信推送）。令牌过期后两个都会失效，此时重跑 `get-token.ps1` 更新 `WB_TOKEN` 即可。
 >
-> 推送刷屏想关小：把两个 workflow 里的 `PUSH_LEVEL: all` 改成 `action`。
+> 推送想更安静：把两个 workflow 里的 `PUSH_LEVEL: action` 改成 `off`（彻底静默）；改成 `all` 则每次巡检都推。

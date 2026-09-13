@@ -71,45 +71,67 @@ jobs:
           # 手动触发时勾选 force_notify=true，强制推一条（本次是"跳过"也推），
           # 标题带「（测试）」前缀 —— 这是旅行侧唯一的推送验证入口。
           FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}
+        id: run_travel
         run: |
           set -e
           ARGS=""
           if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ -n "$LOCATION" ] && [ "$LOCATION" != "0" ]; then ARGS="$ARGS --location $LOCATION"; fi
           echo "python travel.py $ARGS"
-          python travel.py $ARGS
+          # 输出落盘，供下一步的运行戳提取本次 action；最后以脚本自身的退出码结束本步骤。
+          python travel.py $ARGS > "$RUNNER_TEMP/wb-travel.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/wb-travel.log"
+          ACTION="$(sed -n 's/.*"action": *"\([^"]*\)".*/\1/p' "$RUNNER_TEMP/wb-travel.log" | head -1)"
+          echo "action=${ACTION:-unknown}" >> "$GITHUB_OUTPUT"
+          exit ${rc:-0}
 
-      # 每日「运行戳」：与 checkin.yml 同一机制，但用**独立文件**（否则两个 workflow 会互相挡住，
-      # travel 08:15 早于 checkin 09:00）。作用：证明 travel 的定时触发确实发生了，
-      # 且从戳上的时间可看出当天首个成功时点是几点 —— 若 08:15 漏了而 12:30 跑了，一眼可辨。
+      # 每日「运行戳」：把当天「第一笔运行」和当天出现过的实质动作记录进一个文件并提交。
       #
-      # 门控规则：今天已由【定时】戳过 → 跳过；只被【手动】戳过 → 手动不占名额，等定时来覆盖；
-      # 已被手动戳过且本次也是手动 → 跳过（避免连点刷提交）。
+      # 为什么需要它：积分到账在仓库里看不见，本自动化又没有别的远端副作用，
+      # 于是「今天到底跑没跑、被谁触发、结果是什么」从外部无从判断。这个文件就是
+      # **不需要任何 API 就能读的账本**：
+      #   有今天的戳   = 今天确实跑过
+      #   event=...    = 触发来源（schedule = GitHub 原生定时；workflow_dispatch = 外部定时器或手动）
+      #   action=...   = 本次结果（claimed / departed = 有实质动作；skip_* = 空跑；none / error = 异常）
+      #
+      # 门控规则：
+      #   当天还没有戳                                → 写入（哪怕空跑或出错，先留下「跑过」的证据）
+      #   当天已有戳 + 本次是实质动作且与已记录的不同 → 覆盖（travel 当天会先 departed 后 claimed，各记一笔）
+      #   其余情况                                    → 保持原样
+      #
+      # 与旧版的区别：旧版是「schedule 覆盖一切」，目的是证明原生定时跑了；但主触发源改为
+      # 外部定时器后（走 workflow_dispatch），旧规则会把 00:05 的领取记录覆盖成 09:xx 的空跑，
+      # 反而掩盖真相。两个 workflow 仍各用独立文件，避免互相挡住。
       #
       # 注意：schedule / workflow_dispatch 触发时 actions/checkout 处于 detached HEAD，
-      # 裸 `git push` 会报 "You are not currently on a branch" 而静默失败（本步骤是 continue-on-error，
-      # job 不会变红），所以必须显式写 HEAD:main。
-      - name: Daily run stamp (proves the scheduled trigger fired)
+      # 裸 `git push` 会报 "You are not currently on a branch" 而静默失败
+      # （本步骤是 continue-on-error，不会让 job 变红），所以必须显式写 HEAD:main。
+      - name: Daily run stamp (event + action ledger)
+        # if: always() —— 脚本报错时也要留下「今天跑过、结果是 error」的记录，
+        # 否则出错日反而毫无痕迹（旧版正是如此）。
+        if: always()
         continue-on-error: true
         env:
           TZ: Asia/Shanghai
+          ACTION: ${{ steps.run_travel.outputs.action }}
         run: |
           set -e
           mkdir -p .keepalive
           STAMP=".keepalive/last-run-travel.txt"
           TODAY="$(date +%Y-%m-%d)"
-          EVENT="${GITHUB_EVENT_NAME}"
           if [ -f "$STAMP" ] && [ "$(cut -d' ' -f1 "$STAMP")" = "$TODAY" ]; then
-            if grep -q "event=schedule" "$STAMP"; then
-              echo "Already stamped today by a scheduled run: $TODAY"
-              exit 0
-            fi
-            if [ "$EVENT" != "schedule" ]; then
-              echo "Stamped today by a non-scheduled run; waiting for a scheduled run to overwrite: $TODAY"
-              exit 0
-            fi
+            case "${ACTION}" in
+              claimed|departed)
+                if grep -q "action=${ACTION}" "$STAMP"; then
+                  echo "already recorded action=${ACTION} today:"; cat "$STAMP"; exit 0
+                fi
+                ;;
+              *)
+                echo "no new meaningful action (action=${ACTION}); keep:"; cat "$STAMP"; exit 0
+                ;;
+            esac
           fi
-          echo "$(date '+%Y-%m-%d %H:%M:%S %z') travel event=${EVENT}" > "$STAMP"
+          echo "$(date '+%Y-%m-%d %H:%M:%S %z') travel event=${GITHUB_EVENT_NAME} action=${ACTION:-unknown}" > "$STAMP"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$STAMP"
