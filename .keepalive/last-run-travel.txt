@@ -1,1 +1,1 @@
-2026-09-13 12:44:44 +0800 travel event=schedule action=claimed
+2026-09-14 00:43:49 +0800 travel event=schedule action=departed
