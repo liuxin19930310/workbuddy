@@ -112,10 +112,14 @@ token` 的案例（组织仓更常见，个人仓一般正常）。若遇到就�
 >    `In this job's individual timezone (Asia/Shanghai)`。
 > 若时刻显示不符，说明时区或分钟填错了。
 
-#### 更快的做法：`IMPORT FROM CURL`
+#### 更快的做法：`IMPORT FROM CURL`（可选，找不到就跳过）
 
-编辑器**左下角**有 `IMPORT FROM CURL` —— 它能把 URL + 请求方法 + 请求头 + 请求体**一次性灌进去**，
-省掉手填四处，也基本不会敲错（尤其适合要建 6 个 job 的场景）：
+位置容易漏：它在 **Create cronjob 页面的最底部一行** —— 白色卡片**下方**、**最左侧**，
+灰色小字带一个 `<>` 图标，同一行的右边是 `TEST RUN` 和红色的 `CREATE`。
+（`COMMON` 页往下滚也能看到；不同窗口高度下可能被截在屏幕外。）
+
+它能把 URL + 请求方法 + 请求头 + 请求体**一次性灌进去**，省掉手填四处，也基本不会敲错
+（尤其适合要建 6 个 job 的场景）：
 
 ```bash
 curl -X POST \
@@ -126,7 +130,10 @@ curl -X POST \
   https://api.github.com/repos/<owner>/<repo>/actions/workflows/<file>.yml/dispatches
 ```
 
-> 导入后**仍要核对**三处：请求头是否 3 条、请求体是否为 `{"ref":"main"}`、
+> **这一步是可选的。** 剩下的只有「请求头 3 条 + 请求体 1 行」，手填只要 30 秒 ——
+> 为了找这个按钮卡住不值得，直接照 4.2 的表填完即可。
+>
+> 若确实要用，导入后**仍要核对**三处：请求头是否 3 条、请求体是否为 `{"ref":"main"}`、
 > 时区是否为 `Asia/Shanghai`（导入不会自动帮你确认这些）。
 >
 > 建剩下 5 个 job 时，最省事的组合是：`IMPORT FROM CURL`（只把 URL 换成对应仓库/工作流）
