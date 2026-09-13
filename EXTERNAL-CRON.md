@@ -281,6 +281,25 @@ cron-job.org 也提供 REST API（`PUT https://api.cron-job.org/jobs`，API key 
 | `workbuddy_867177378` | Daily Checkin | #9 | `Manually triggered` | `2026-09-13 10:39:32 +0800 checkin event=workflow_dispatch action=claimed` |
 | `workbuddy_867177378` | Cat Travel | #9 | `Manually triggered` | `2026-09-13 10:47:12 +0800 travel event=workflow_dispatch action=claimed` |
 
+### 第二轮：6 个 job 全量测试（10:50~10:53）
+
+| 仓库 | 工作流 | 新运行 | 触发方式 | 结果 |
+|---|---|---|---|---|
+| `workbuddy` | Daily Checkin | #8 | `Manually triggered` | Success（11s，job 6s），无推送注解 = 今日已领 → skip |
+| `workbuddy` | Cat Travel | #9 / #10 | `Manually triggered` | Success（job 6s）；猫仍在旅行 → `skip_traveling` |
+| `workbuddy_867177378` | Daily Checkin | #10 | `Manually triggered` | Success；10:39 已领过 → skip |
+| `workbuddy_867177378` | Cat Travel | #10 / #11 | `Manually triggered` | Success；10:47 已领过 → skip |
+
+**6 个 job 全部测试成功，无一失败。**
+
+> ⚠️ 一个容易误判的现象：老号那两条 Cat Travel 显示总时长 **47s / 48s**，而平时只要 10s 左右。
+> 点进详情页会看到 **job 本身只跑了 6 秒** —— 多出来的时间是**并发锁排队**
+> （两次测试撞在同一个 `concurrency.group: workbuddy-travel` 上，后者等前者）。
+> 所以「总时长变长」≠「变慢」，判据要看 job 自身的耗时。
+
+> 第二轮账本**没有新增提交** —— 这是设计预期：6 次全是「今日已完成」的空跑，
+> 门控规则明确不允许空跑覆盖当天已有的真实记录（否则第二轮会把第一轮的 `claimed` 记录冲掉）。
+
 四点关键结论：
 
 1. 运行详情页显示 **`on: workflow_dispatch` + `Manually triggered <时间>`** —— 证明请求确实来自外部调度器
