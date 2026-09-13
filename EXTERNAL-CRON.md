@@ -91,18 +91,26 @@ token` 的案例（组织仓更常见，个人仓一般正常）。若遇到就�
 
 列表页点 **`Create cronjob`**，然后按下表填：
 
-| 界面位置 | 填什么 |
+| 界面位置（括号内为**中文界面**的对应名称） | 填什么 |
 |---|---|
-| **Title** | 例 `WB 签到 · 旧号`（只用于你自己在列表里辨认） |
-| **URL / Address** | 见 4.3 表，**整条粘贴** |
-| **Schedule** → **Timezone** | **必须先改成 `Asia/Shanghai`**（见下方警告） |
-| **Schedule** → 时刻 | 选「每天 / Every day」+ 具体时刻；也可切到自定义 cron 表达式 |
-| **Enabled** | 保持开启 |
-| 展开 **`Advanced settings`** → **Request method** | `POST` |
-| **Headers**（逐条 Add，Key / Value 分开填） | `Accept` → `application/vnd.github+json`<br>`Authorization` → `Bearer <你的 PAT>`<br>`Content-Type` → `application/json` |
-| **Request body** | `{"ref":"main"}` |
-| **Notifications** | 建议开启 **失败时邮件通知**（见第七节） |
-| 最后 | 点 **`Save`** |
+| **标题** / Title | 例 `WB 签到 · 旧号`（只用于你自己在列表里辨认） |
+| **网址** / URL | 见 4.3 表，**整条粘贴** |
+| **激活任务** / Enabled | 保持开启 |
+| **运行计划** / Schedule → **时区** | 确认是 **`Asia/Shanghai`**（见下方警告） |
+| **运行计划** → 时刻 | 选「每天的 `H` : `MM`」那一行 —— 签到 `0` : `05`、猫猫出发 `8` : `00`、猫猫领取 `12` : `30`；也可切「自订」直接写 crontab |
+| **调度到期** | 保持关闭（我们不需要 job 自动过期） |
+| **通知我于** → **计划任务运行失败** | **建议打开**（见第七节） |
+| **通知我于** → **由于失败次数太多，计划任务将被停用** | 保持开启 |
+| 展开 **高级设置** / Advanced settings → **请求方法** | `POST` |
+| **请求头** / Headers（逐条 Add，名称 / 值 分开填） | `Accept` → `application/vnd.github+json`<br>`Authorization` → `Bearer <你的 PAT>`<br>`Content-Type` → `application/json` |
+| **请求体** / Request body | `{"ref":"main"}` |
+| 最后 | 点 **`保存`** （在页面最底部，不点不生效） |
+
+> **填完当场自检两个地方**，不用等明天：
+> 1. 页面中部的 **`Crontab 表达式`** 应显示 `5 0 * * *`（签到）；
+> 2. 右侧 **`下一次运行`** 应显示次日 `12:05 AM`（= 00:05），且下方小字写着
+>    `In this job's individual timezone (Asia/Shanghai)`。
+> 若时刻显示不符，说明时区或分钟填错了。
 
 > ⚠️ **时区是最容易踩的坑**：cron-job.org 是德国服务，job 的 `timezone` **默认不是北京时间**
 > （官方 API 文档的示例值是 `Europe/Berlin`）。若不改成 `Asia/Shanghai`，你填的 00:05
