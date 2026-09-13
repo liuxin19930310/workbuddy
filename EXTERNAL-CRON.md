@@ -112,6 +112,26 @@ token` 的案例（组织仓更常见，个人仓一般正常）。若遇到就�
 >    `In this job's individual timezone (Asia/Shanghai)`。
 > 若时刻显示不符，说明时区或分钟填错了。
 
+#### 更快的做法：`IMPORT FROM CURL`
+
+编辑器**左下角**有 `IMPORT FROM CURL` —— 它能把 URL + 请求方法 + 请求头 + 请求体**一次性灌进去**，
+省掉手填四处，也基本不会敲错（尤其适合要建 6 个 job 的场景）：
+
+```bash
+curl -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer <你的 PAT>" \
+  -H "Content-Type: application/json" \
+  -d '{"ref":"main"}' \
+  https://api.github.com/repos/<owner>/<repo>/actions/workflows/<file>.yml/dispatches
+```
+
+> 导入后**仍要核对**三处：请求头是否 3 条、请求体是否为 `{"ref":"main"}`、
+> 时区是否为 `Asia/Shanghai`（导入不会自动帮你确认这些）。
+>
+> 建剩下 5 个 job 时，最省事的组合是：`IMPORT FROM CURL`（只把 URL 换成对应仓库/工作流）
+> → 再改标题与时刻。
+
 > ⚠️ **时区必须每次确认，不要假设**：cron-job.org 是德国服务，job 的 `timezone` 由账号/地区决定
 > —— 官方 API 文档的示例值是 `Europe/Berlin`，而 2026-09-13 **实测中文界面下默认就是
 > `Asia/Shanghai`**。两种都可能出现，所以**每次都要先看一眼**再填时刻。
