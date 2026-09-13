@@ -270,6 +270,33 @@ cron-job.org 也提供 REST API（`PUT https://api.cron-job.org/jobs`，API key 
 
 ---
 
+## 九、启用记录（2026-09-13 实测验收）
+
+外部定时器于 **2026-09-13 10:35~10:47（北京）** 首次实测打通。证据全部来自公开可查的运行记录与仓库账本：
+
+| 仓库 | 工作流 | 新运行 | 触发方式 | 账本记录 |
+|---|---|---|---|---|
+| `workbuddy` | Cat Travel | #6 / #7 / #8 | `Manually triggered` | `2026-09-13 10:42:02 +0800 travel event=workflow_dispatch action=skip_traveling` |
+| `workbuddy` | Daily Checkin | #6 / #7 | `Manually triggered` | 当天已有 `event=schedule` 记录且本次是 skip → 按门控规则**保持原样** ✅ |
+| `workbuddy_867177378` | Daily Checkin | #9 | `Manually triggered` | `2026-09-13 10:39:32 +0800 checkin event=workflow_dispatch action=claimed` |
+| `workbuddy_867177378` | Cat Travel | #9 | `Manually triggered` | `2026-09-13 10:47:12 +0800 travel event=workflow_dispatch action=claimed` |
+
+四点关键结论：
+
+1. 运行详情页显示 **`on: workflow_dispatch` + `Manually triggered <时间>`** —— 证明请求确实来自外部调度器
+   （cron-job.org 的 `TEST RUN`），而非 GitHub 原生 cron。
+2. **账本里出现了 `event=workflow_dispatch`** —— 这正是第四节门控规则改版的直接目的。
+   改版前（旧规则「`schedule` 覆盖一切」）这条 10:42 的记录会被后续的 `schedule` 空跑覆盖掉，
+   从而看不出外部调度器到底有没有生效。
+3. 推送注解 `notify(bark) -> ok: [bark] code=200` —— 推送通道同时可用。
+4. 新号仓库那两条是 `action=claimed` 而**不是空跑** —— 该账号当天的签到与猫猫奖励此前都没跑过，
+   这次实测顺手真的领到了（接口幂等，不存在重复领取风险）。
+
+> ⚠️ 判别要点：用 API / TEST RUN 触发的运行，在 Actions 页**同样显示为 `Manually run`**，
+> 与真人手点无法区分 —— 所以上表里「时间」与账本内容才是判据，不能只看事件名。
+
+---
+
 ## 附：不想用网页配置时，可以先在本机验证 PAT
 
 ```bash
