@@ -80,42 +80,99 @@ token` 的案例（组织仓更常见，个人仓一般正常）。若遇到就�
 
 ## 四、步骤 2：在 cron-job.org 建 6 个 job
 
-注册 <https://cron-job.org>（免费，邮箱验证后可用），然后逐个创建。
+### 4.1 注册（只需一次）
 
-### 每个 job 的公共配置
+打开 <https://cron-job.org> → 右上 `Sign up` → 填邮箱 + 密码 → **去邮箱点验证链接**
+（不验证无法使用；免费、无需信用卡）。
 
-| 字段 | 值 |
+登录后默认落在 **Cronjobs** 页（job 列表）。
+
+### 4.2 建一个 job 的完整点法（照做，之后重复 5 次）
+
+列表页点 **`Create cronjob`**，然后按下表填：
+
+| 界面位置 | 填什么 |
 |---|---|
-| Request method | **POST** |
-| Header 1 | `Accept` → `application/vnd.github+json` |
-| Header 2 | `Authorization` → `Bearer <你的 PAT>` |
-| Header 3 | `Content-Type` → `application/json` |
-| Request body | `{"ref":"main"}` |
+| **Title** | 例 `WB 签到 · 旧号`（只用于你自己在列表里辨认） |
+| **URL / Address** | 见 4.3 表，**整条粘贴** |
+| **Schedule** → **Timezone** | **必须先改成 `Asia/Shanghai`**（见下方警告） |
+| **Schedule** → 时刻 | 选「每天 / Every day」+ 具体时刻；也可切到自定义 cron 表达式 |
+| **Enabled** | 保持开启 |
+| 展开 **`Advanced settings`** → **Request method** | `POST` |
+| **Headers**（逐条 Add，Key / Value 分开填） | `Accept` → `application/vnd.github+json`<br>`Authorization` → `Bearer <你的 PAT>`<br>`Content-Type` → `application/json` |
+| **Request body** | `{"ref":"main"}` |
+| **Notifications** | 建议开启 **失败时邮件通知**（见第七节） |
+| 最后 | 点 **`Save`** |
 
-> cron-job.org 会忽略 `User-Agent` 和 `Connection` 头，属正常；GitHub 只要求「有」User-Agent，
+> ⚠️ **时区是最容易踩的坑**：cron-job.org 是德国服务，job 的 `timezone` **默认不是北京时间**
+> （官方 API 文档的示例值是 `Europe/Berlin`）。若不改成 `Asia/Shanghai`，你填的 00:05
+> 会按欧洲时间执行 —— 换算成北京时间可能是 06:05 左右，**而且不会有任何报错**。
+>
+> 保存后到 job 详情页核对 **`Next execution`**：它应当等于你期望的北京时间。
+> 若显示成别的时刻，就是时区没设对，回去改。
+
+> `Bearer ` 后面**有一个空格**，漏掉会返回 401，但错误信息不会提示"少了空格"。
+>
+> cron-job.org 会忽略 `User-Agent` 和 `Connection` 头，属正常 —— GitHub 只要求"有" User-Agent，
 > 它会自带一个，不影响。
 
-> **时区**：job 编辑器里如果能选时区，选 **Asia/Shanghai**，用下表「北京时刻」列；
-> 找不到时区选择就按 **UTC** 列填（两列等价）。
+### 4.3 6 个 job 的值（Timezone 全部 = `Asia/Shanghai`）
 
-### 6 个 job 一览
+| # | Title 建议 | URL（整条粘贴） | 时刻 |
+|---|---|---|---|
+| 1 | `WB 签到 · 旧号` | `https://api.github.com/repos/liuxin19930310/workbuddy/actions/workflows/checkin.yml/dispatches` | 每天 **00:05** |
+| 2 | `WB 猫猫出发 · 旧号` | `https://api.github.com/repos/liuxin19930310/workbuddy/actions/workflows/travel.yml/dispatches` | 每天 **08:00** |
+| 3 | `WB 猫猫领取 · 旧号` | 同 #2 | 每天 **12:30** |
+| 4 | `WB 签到 · 新号` | `https://api.github.com/repos/liuxin19930310/workbuddy_867177378/actions/workflows/checkin.yml/dispatches` | 每天 **00:05** |
+| 5 | `WB 猫猫出发 · 新号` | `https://api.github.com/repos/liuxin19930310/workbuddy_867177378/actions/workflows/travel.yml/dispatches` | 每天 **08:00** |
+| 6 | `WB 猫猫领取 · 新号` | 同 #5 | 每天 **12:30** |
 
-| # | Title（建议） | URL | 计划（北京） | 计划（UTC） |
-|---|---|---|---|---|
-| 1 | `WB 签到 · 旧号` | `https://api.github.com/repos/liuxin19930310/workbuddy/actions/workflows/checkin.yml/dispatches` | 每天 00:05 | `5 16 * * *` |
-| 2 | `WB 猫猫出发 · 旧号` | `https://api.github.com/repos/liuxin19930310/workbuddy/actions/workflows/travel.yml/dispatches` | 每天 08:00 | `0 0 * * *` |
-| 3 | `WB 猫猫领取 · 旧号` | 同 #2 | 每天 12:30 | `30 4 * * *` |
-| 4 | `WB 签到 · 新号` | `https://api.github.com/repos/liuxin19930310/workbuddy_867177378/actions/workflows/checkin.yml/dispatches` | 每天 00:05 | `5 16 * * *` |
-| 5 | `WB 猫猫出发 · 新号` | `https://api.github.com/repos/liuxin19930310/workbuddy_867177378/actions/workflows/travel.yml/dispatches` | 每天 08:00 | `0 0 * * *` |
-| 6 | `WB 猫猫领取 · 新号` | 同 #5 | 每天 12:30 | `30 4 * * *` |
+**#3 与 #2、#6 与 #5 的 URL 完全相同** —— 靠时刻区分即可（cron-job.org 一个 job 只有一条计划）。
 
-对应 cron 表达式（北京时区下）：
+若改用自定义 cron 表达式：
 
 ```
-5 0 * * *      # 签到
-0 8 * * *      # 猫猫出发
-30 12 * * *    # 猫猫领取
+# Timezone = Asia/Shanghai 时直接填这些
+5 0 * * *      # 签到 00:05
+0 8 * * *      # 猫猫出发 08:00
+30 12 * * *    # 猫猫领取 12:30
+
+# 若只能用 UTC（Timezone 改不了时）
+5 16 * * *     # = 北京 00:05（前一天 16:05 UTC）
+0 0 * * *      # = 北京 08:00
+30 4 * * *     # = 北京 12:30
 ```
+
+### 4.4 建完立刻验证（1 分钟）
+
+在任意一个 job 的详情页点 **`Test Run`**，看返回码：
+
+| 返回 | 含义 |
+|---|---|
+| **200 / 204** | ✅ 通了 |
+| 401 | PAT 无效 / 已过期 / 贴错；**`Bearer ` 后少空格也算 401** |
+| 403 | PAT 权限不足（细粒度必须是 `Actions: Read and write`，且勾了该仓库） |
+| 404 | 仓库名或 workflow 文件名写错（必须是 `checkin.yml` 这种**文件名**） |
+
+同时去 GitHub 仓库 → `Actions` 页：应出现一条 Event 为 `Manually run` 的运行，
+时间与刚刚点 Test Run 的时刻吻合。
+
+> 用 API 触发的运行在 Actions 页也显示为 "Manually run"，无法与真人手点区分 —— 看时间判断。
+
+### 4.5 建完后的最终核对
+
+回到 **Cronjobs** 列表，逐条确认：
+
+- 每条的 **Enabled** 是开的；
+- **Next execution** 显示的时刻符合北京时间预期；
+- 6 条都在，没有漏建。
+
+### 4.6 更省事的办法（可选）
+
+cron-job.org 也提供 REST API（`PUT https://api.cron-job.org/jobs`，API key 在控制台
+`Settings` 里生成），可以脚本化创建这 6 个 job。是否需要取决于你的账号是否开放该 key：
+能拿到就走 API 批量创建（省去 6 次手工填表、且不会敲错 URL），拿不到就用上面的手工路径。
+接口文档：<https://docs.cron-job.org/rest-api.html>
 
 ### 为什么猫猫只要两个时点
 
