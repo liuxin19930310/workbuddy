@@ -56,10 +56,11 @@ from datetime import datetime, timedelta, timezone
 
 # 域名：默认与签到保持同一个域（www.codebuddy.cn），可用 WB_DOMAIN 覆盖。
 #
-# 血泪教训：这里曾硬编码 www.workbuddy.cn，而签到走 www.codebuddy.cn。两者共用同一个
-# WB_TOKEN，但 GitHub Actions（海外机房 IP）请求 workbuddy.cn 被网关拒绝（HTTP 401/403），
-# 签到却一直正常 —— 同一把令牌，一把锁开了另一把没开，说明问题在域名侧而非令牌侧。
-# 两个任务用同一个域，任一侧被风控时才有一致的表现、也更好排查。
+# 2026-10-12 复盘：曾把「旅行连续失败、签到一直正常」误判为 workbuddy.cn 被 GitHub
+# 机房 IP 风控。该假设已被证伪 —— 两个域名从 GitHub runner 都能正常访问，真正原因是
+# 仓库 Secret WB_TOKEN 里的令牌到期（accessToken 有效期 28 天），签到与旅行在同一时刻
+# 一起失效。保留 WB_DOMAIN 可配、并把实际请求域名写进日志与推送，是为了两侧行为一致、
+# 排查时不再被域名差异分散注意力。
 DEFAULT_DOMAIN = "www.codebuddy.cn"
 DOMAIN = (os.environ.get("WB_DOMAIN") or "").strip() or DEFAULT_DOMAIN
 BASE = "https://%s/activity/growth/buddy/travel" % DOMAIN
