@@ -54,6 +54,9 @@ jobs:
         env:
           # 与签到共用同一个令牌，推送渠道与密钥也要与 checkin.yml 保持一致
           WB_TOKEN: ${{ secrets.WB_TOKEN }}
+          # 与签到走同一个域名。曾经这里不设、脚本里硬编码 www.workbuddy.cn，导致 CI 侧
+          # 只有旅行被网关拒绝（签到走 www.codebuddy.cn 一直正常），排查时极易误判成令牌失效。
+          WB_DOMAIN: www.codebuddy.cn
           # 渠道见 checkin.yml 的说明；不设时默认 serverchan
           NOTIFY_CHANNEL: serverchan
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}

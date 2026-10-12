@@ -54,7 +54,15 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-BASE = "https://www.workbuddy.cn/activity/growth/buddy/travel"
+# 域名：默认与签到保持同一个域（www.codebuddy.cn），可用 WB_DOMAIN 覆盖。
+#
+# 血泪教训：这里曾硬编码 www.workbuddy.cn，而签到走 www.codebuddy.cn。两者共用同一个
+# WB_TOKEN，但 GitHub Actions（海外机房 IP）请求 workbuddy.cn 被网关拒绝（HTTP 401/403），
+# 签到却一直正常 —— 同一把令牌，一把锁开了另一把没开，说明问题在域名侧而非令牌侧。
+# 两个任务用同一个域，任一侧被风控时才有一致的表现、也更好排查。
+DEFAULT_DOMAIN = "www.codebuddy.cn"
+DOMAIN = (os.environ.get("WB_DOMAIN") or "").strip() or DEFAULT_DOMAIN
+BASE = "https://%s/activity/growth/buddy/travel" % DOMAIN
 TIMEOUT = 30
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36")
@@ -94,8 +102,8 @@ def call(token, path, method="GET", payload=None):
         "accept": "application/json, text/plain, */*",
         "accept-language": "zh-CN,zh;q=0.9",
         "authorization": "Bearer " + token,
-        "referer": "https://www.workbuddy.cn/profile/growth-center",
-        "origin": "https://www.workbuddy.cn",
+        "referer": "https://%s/profile/growth-center" % DOMAIN,
+        "origin": "https://%s" % DOMAIN,
         "user-agent": UA,
         "x-client-platform": "web",
     }
@@ -324,6 +332,9 @@ def build_title(result):
 def build_body(result):
     lines = ["时间：%s" % result.get("time", ""),
              "状态：%s" % result.get("state", "-")]
+    # 把本次实际请求的域名写进消息：域名是这轮排查的关键变量，漏掉它下次还得再挖一遍
+    if result.get("domain"):
+        lines.append("域名：%s" % result["domain"])
     # 出错时 action 也可能是 "none"，此时不列动作，只给原因，避免误显成 dry-run
     if result.get("action") and result.get("status") != "error":
         lines.append("动作：%s" % {
@@ -378,18 +389,27 @@ def main():
     if not token:
         token, source = read_local_token()
     if not token:
-        emit({"status": "error", "action": "none", "time": now_cn(),
+        emit({"status": "error", "action": "none", "time": now_cn(), "domain": DOMAIN,
               "msg": "未找到令牌：请设置环境变量 WB_TOKEN，或先在本机登录 WorkBuddy 桌面端"})
         return 1
 
     st, body = call(token, "/status")
     if st in (401, 403) or body.get("code") in (401, 403):
+        # 401 与 403 必须分开说。403 多数是网关/风控按出口 IP 或地域拦截，跟令牌没有关系；
+        # 曾把两者合并报成「令牌已失效」，于是每次排查都被引去重取令牌，反而掩盖了真问题。
+        code = st if st in (401, 403) else body.get("code")
+        if code == 401:
+            msg = "令牌已失效（HTTP 401），请重新获取 accessToken 并更新 Secret"
+        else:
+            msg = ("请求被拒绝（HTTP %s）：域名 %s 疑似被网关/风控拦截（机房 IP 或地域限制），"
+                   "不是令牌失效。请先在本机验证该域名是否可访问，或改用可访问的域名（WB_DOMAIN）"
+                   % (code, DOMAIN))
         emit({"status": "error", "action": "none", "time": now_cn(), "source": source,
-              "msg": "令牌已失效（HTTP %s），请重新获取 accessToken 并更新 Secret" % st})
+              "domain": DOMAIN, "msg": msg})
         return 1
     if body.get("code") != 0:
         emit({"status": "error", "action": "none", "time": now_cn(), "source": source,
-              "msg": "状态查询失败：%s" % body.get("msg")})
+              "domain": DOMAIN, "msg": "状态查询失败：%s" % body.get("msg")})
         return 1
 
     d = body.get("data") or {}
@@ -402,7 +422,7 @@ def main():
     remain_minutes = None
     if d.get("arrive_at") and d.get("server_now"):
         remain_minutes = max(0, int((int(d["arrive_at"]) - int(d["server_now"])) // 60))
-    base = {"time": now_cn(), "state": state, "source": source,
+    base = {"time": now_cn(), "state": state, "source": source, "domain": DOMAIN,
             "daily_limit_reached": limit, "record_id": record_id,
             "location": loc_name, "arrive_at": arrive_at}
     if remain_minutes:

@@ -250,7 +250,7 @@ GET /status 读服务端状态
 
 | 项 | 实测结论 |
 |---|---|
-| 域名 | `https://www.workbuddy.cn` |
+| 域名 | 与签到同域：`https://www.codebuddy.cn`（可用环境变量 `WB_DOMAIN` 覆盖；两个域名都实测可用） |
 | 路径前缀 | `/activity/growth/buddy/travel/` |
 | 端点 | `GET /status`、`GET /config`、`POST /depart`、`POST /claim` |
 | 鉴权 | **桌面端 Bearer 令牌可用**（无需浏览器 Cookie） |
@@ -258,6 +258,12 @@ GET /status 读服务端状态
 | depart 参数 | **`location_id`**（传错值时服务端明确回 `location not available`，字段名由此确认） |
 
 > ⚠️ 与网文说法的出入：网上教程称「必须用浏览器 Cookie，且路径不能带 /v2/，否则 401」。本机实测：**Bearer 令牌可用**，且**带不带 `/v2/` 都返回 200**（网文的 401 是因为当时没有有效凭据，与路径无关）。因此这里复用签到那一个令牌，无需维护易过期的 Cookie，也就能放进 GitHub Actions。
+
+> ⚠️ 域名避坑（2026-10-12 踩过）：旅行侧原先硬编码 `www.workbuddy.cn`，而签到走 `www.codebuddy.cn`。
+> 两者共用同一个 `WB_TOKEN`，但 GitHub Actions（海外机房 IP）请求 `workbuddy.cn` 被网关拒绝，
+> 现象是「旅行连续失败、签到一直正常」，因为脚本把 401/403 合并报成「令牌已失效」，
+> 排查时被误导去重取令牌。现已统一到 `codebuddy.cn`，并支持用 `WB_DOMAIN` 覆盖；
+> 脚本还会把实际请求的域名写进日志与推送正文。
 
 ## 三、调度说明
 
