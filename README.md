@@ -2,12 +2,13 @@
 
 用 GitHub Actions 每天定时调用 WorkBuddy 官方接口，**不依赖本机是否开机** —— 电脑关机、出差、假期都能照常跑。
 
-本仓库承载两个独立自动化，共用同一个令牌 Secret：
+本仓库承载三个独立自动化，共用同一个令牌 Secret：
 
 | 自动化 | 脚本 | 工作流 | 做什么 |
 |---|---|---|---|
 | **Buddy 加油站签到** | `checkin.py` | `checkin.yml` | 每日领取签到积分（+100，连签有额外奖励） |
 | **派猫猫旅行** | `travel.py` | `travel.yml` | 派出猫猫旅行 → 归来后自动领取 5~10 积分（每日闭环） |
+| **令牌到期哨兵** | `token_watch.py` | `token-watch.yml` | 每周一查一次令牌剩余寿命，不足 7 天就推微信提醒刷新（兜底，见「令牌来源」） |
 
 > ## ⚠️ 本仓库必须保持 public，不要改回私有
 >
@@ -63,6 +64,27 @@ macOS:   ~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/workb
 | `auth.accessToken` | JWT，实测有效期 **28 天**（2026-10-12 实测：`iat` 与 `exp` 相差 2419200 秒）。早期文档写的 60 天（`expiresIn = 5184000`）已与服务端现状不符，**按 28 天排维护计划** |
 | `auth.refreshToken` | 有效期 **90 天**（`refreshExpiresIn = 7776000` 秒） |
 | `auth.domain` | `www.codebuddy.cn` |
+
+### 令牌续期：两层防护
+
+28 天的寿命意味着**每 28 天必须换一次 Secret**。仓库自带的 `get-token.ps1` 只把新令牌丢进剪贴板、
+靠人肉粘到 GitHub 网页 —— 2026-10-12 那次两天全红的故障就是被这一环忘了（详见 travel 部分的故障复盘）。
+现在改成两层，都不需要手工粘贴：
+
+| 层 | 位置 | 频率 | 依赖 | 作用 |
+|---|---|---|---|---|
+| **主力** | 本机 WorkBuddy 自动化（`workbuddy-secret-refresh` skill） | 每 14 天 | 到点电脑开着 + 客户端在跑 | 取本机最新 accessToken，用 API 直接写进 Secret |
+| **兜底** | `token-watch.yml`（GitHub Actions） | 每周一 11:00 | 无（纯 runner） | 只读 Secret 里令牌的 `exp`，不足 7 天就推微信喊你手动刷 |
+
+主力那层依赖本机开机，所以必须有兜底：`token-watch.py` 不碰任何本机资源，
+只用 `base64` 解 JWT 的 payload 读 `exp`（**不验签**，验签没有意义）。三级判定：
+
+- `days_left <= 0` → `expired`，推微信 + `exit 1`（run 变红，形成双重可见信号）
+- `days_left < 7` → `soon`，推微信 + `exit 0`（run 摘要留 warning 注解）
+- 其余 → `ok`，**完全静默**（正常周一你什么都不会收到）
+
+异常也走告警：`WB_TOKEN` 为空 / 不是 JWT 形态 / 缺 `exp` 字段，都会当成 `expired` 处理 ——
+这类情况下 checkin 与 travel 同样是必挂的，静默才是失职。
 
 ---
 
@@ -330,11 +352,13 @@ python travel.py --location 1   # 指定咖啡馆
 |---|---|
 | `checkin.py` | 签到主脚本。零第三方依赖（仅标准库），幂等、令牌全脱敏、`PUSH_LEVEL` 可调推送级别；本地/CI 双模式 |
 | `travel.py` | 派猫猫旅行闭环脚本。状态机 + 幂等，纯标准库，令牌全脱敏，`PUSH_LEVEL` 可调；本地/CI 双模式 |
+| `token_watch.py` | 令牌到期哨兵。只读 JWT 的 `exp`（不验签、不改任何数据），不足阈值就推微信；`TOKEN_WARN_DAYS` 可调 |
 | `.github/workflows/checkin.yml` | 签到任务（外部定时器 + 原生 cron 兜底、手动触发、并发保护、每日运行戳、Node 24 版 action） |
 | `.github/workflows/travel.yml` | 猫猫旅行任务（外部定时器 + 4 个时点兜底巡检、支持 dry_run 与指定地点） |
+| `.github/workflows/token-watch.yml` | 令牌到期哨兵（每周一巡检；`permissions: contents: read`，只读不写） |
 | `EXTERNAL-CRON.md` | **外部定时器部署手册**：cron-job.org 配置、GitHub PAT 创建、验证方法与维护须知 |
 | `get-token.ps1` | 提取本机 accessToken 到剪贴板，只打印脱敏预览与到期时间 |
 
-> 两个自动化共用 Secret：`WB_TOKEN`（令牌）、`SERVERCHAN_KEY`（可选，微信推送）。令牌过期后两个都会失效，此时重跑 `get-token.ps1` 更新 `WB_TOKEN` 即可。
+> 三个自动化共用 Secret：`WB_TOKEN`（令牌）、`SERVERCHAN_KEY`（可选，微信推送）。令牌过期后签到与旅行都会失效，此时重跑 `get-token.ps1` 更新 `WB_TOKEN` 即可（`token-watch.yml` 会在到期前一周先提醒你）。
 >
-> 推送想更安静：把两个 workflow 里的 `PUSH_LEVEL: action` 改成 `off`（彻底静默）；改成 `all` 则每次巡检都推。
+> 推送想更安静：把三个 workflow 里的 `PUSH_LEVEL` 改成 `off`（彻底静默）；改成 `all` 则每次巡检都推。
