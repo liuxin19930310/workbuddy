@@ -212,7 +212,7 @@ def build_push(result):
         title = prefix + "WB_TOKEN 还有 %s 天到期，记得刷新" % (
             ("%.0f" % days) if days is not None else "?")
         body = ("> 到期时间：**%s**，剩余 **%.1f 天**（阈值 %s 天）。\n\n"
-                "本机每 14 天会自动刷新，正常情况你不该收到这条 —— 收到说明那个自动化没生效\n"
+                "本机有定期自动刷新 Secret 的自动化，正常情况你不该收到这条 —— 收到说明它没生效\n"
                 "（多半是到点电脑没开，或客户端没运行）。\n\n"
                 "**处置**：在本机跑一次刷新，或直接等下一个自动刷新窗口。\n\n"
                 "```\nC:\\Users\\Liuxin\\.workbuddy\\binaries\\python\\envs\\wbsecret\\Scripts\\python.exe "
