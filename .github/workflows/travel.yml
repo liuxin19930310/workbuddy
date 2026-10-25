@@ -62,7 +62,8 @@ jobs:
           BARK_KEY: ${{ secrets.BARK_KEY }}
           # 自建 Bark 服务器时填自己的域名；留空用官方 https://api.day.app
           BARK_SERVER: ''
-          BARK_GROUP: workbuddy
+          WB_LABEL: '旧号'
+          BARK_GROUP: wb-old
           BARK_LEVEL: active
           # 推送级别：action = 只在派出成功 / 领取成功 / 出错时推（默认，每天 ≤2 条）
           #           all    = 每次巡检都推（含「旅行中」这类无动作结果，每天 4 条）

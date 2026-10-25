@@ -196,7 +196,8 @@ def annotate(result):
 def build_push(result):
     """返回 (title, content)。"""
     forced = result.get("forced")
-    prefix = "（测试）" if forced else ""
+    label = os.environ.get("WB_LABEL", "").strip()
+    prefix = ("【%s】" % label if label else "") + ("（测试）" if forced else "")
     days = result.get("days_left")
     exp = result.get("token_exp", "未知")
     if result.get("level") == "expired":

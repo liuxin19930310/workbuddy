@@ -48,7 +48,8 @@ jobs:
           # 推送渠道与密钥沿用 checkin.yml（2026-10-25 起统一为 bark）
           NOTIFY_CHANNEL: bark
           BARK_KEY: ${{ secrets.BARK_KEY }}
-          BARK_GROUP: workbuddy
+          WB_LABEL: '旧号'
+          BARK_GROUP: wb-old
           BARK_LEVEL: active
           # action = 只在 expired / soon 时推（正常周一完全静默，不打扰）
           PUSH_LEVEL: action

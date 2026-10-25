@@ -56,7 +56,8 @@ jobs:
           BARK_SERVER: ''
           # 通知分组（便于在通知中心归类）与级别：
           #   active(默认) / timeSensitive(可突破专注模式) / critical(静音也响) / passive(静默进列表)
-          BARK_GROUP: workbuddy
+          WB_LABEL: '旧号'
+          BARK_GROUP: wb-old
           BARK_LEVEL: active
           # 推送级别：action = 只在领取成功 / 出错时推（默认，每天最多 1 条）
           #           all    = 每次巡检都推（含「今日已签到」这类无动作结果，每天 5 条）

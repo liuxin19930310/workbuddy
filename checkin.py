@@ -246,7 +246,8 @@ def is_forced():
 
 
 def build_title(result):
-    prefix = "（测试）" if is_forced() else ""
+    label = os.environ.get("WB_LABEL", "").strip()
+    prefix = ("【%s】" % label if label else "") + ("（测试）" if is_forced() else "")
     if result.get("status") == "error":
         return prefix + "签到异常，需要处理"
     if result.get("action") == "claimed":

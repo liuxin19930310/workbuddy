@@ -310,7 +310,8 @@ def fmt_remain(minutes):
 
 def build_title(result):
     # 测试推送加前缀，便于和真实通知区分（force_notify 时）
-    prefix = "（测试）" if is_forced() else ""
+    label = os.environ.get("WB_LABEL", "").strip()
+    prefix = ("【%s】" % label if label else "") + ("（测试）" if is_forced() else "")
     a = result.get("action")
     if result.get("status") == "error":
         return prefix + "猫猫旅行异常，需要处理"
