@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       force_notify:
-        description: '强制推送一条微信通知（用于验证 SERVERCHAN_KEY 配置是否正确）'
+        description: '强制推送一条通知（用于验证 BARK_KEY 配置是否正确）'
         type: boolean
         default: false
 
@@ -45,9 +45,11 @@ jobs:
           # 距到期不足这个天数就推提醒。设 7 天：即便本机 14 天自动化整体失效，
           # 也还有一周的处置窗口。
           TOKEN_WARN_DAYS: '7'
-          # 推送渠道与密钥沿用 checkin.yml，无需新增 Secret
-          NOTIFY_CHANNEL: serverchan
-          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          # 推送渠道与密钥沿用 checkin.yml（2026-10-25 起统一为 bark）
+          NOTIFY_CHANNEL: bark
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          BARK_GROUP: workbuddy
+          BARK_LEVEL: active
           # action = 只在 expired / soon 时推（正常周一完全静默，不打扰）
           PUSH_LEVEL: action
           FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}

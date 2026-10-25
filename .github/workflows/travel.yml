@@ -57,10 +57,13 @@ jobs:
           # 与签到走同一个域名。曾经这里不设、脚本里硬编码 www.workbuddy.cn，导致 CI 侧
           # 只有旅行被网关拒绝（签到走 www.codebuddy.cn 一直正常），排查时极易误判成令牌失效。
           WB_DOMAIN: www.codebuddy.cn
-          # 渠道见 checkin.yml 的说明；不设时默认 serverchan
-          NOTIFY_CHANNEL: serverchan
-          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
-          # 改用 Bark 时加：BARK_KEY: ${{ secrets.BARK_KEY }}
+          # 渠道见 checkin.yml 的说明（2026-10-25 起统一为 bark，原因见那里）
+          NOTIFY_CHANNEL: bark
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          # 自建 Bark 服务器时填自己的域名；留空用官方 https://api.day.app
+          BARK_SERVER: ''
+          BARK_GROUP: workbuddy
+          BARK_LEVEL: active
           # 推送级别：action = 只在派出成功 / 领取成功 / 出错时推（默认，每天 ≤2 条）
           #           all    = 每次巡检都推（含「旅行中」这类无动作结果，每天 4 条）
           #           off    = 本仓不推送（什么都不推，也不产生告警注解）

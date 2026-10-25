@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       force_notify:
-        description: '强制推送一条微信通知（用于验证 SERVERCHAN_KEY 配置是否正确）'
+        description: '强制推送一条通知（用于验证 BARK_KEY 配置是否正确）'
         type: boolean
         default: false
 
@@ -44,14 +44,20 @@ jobs:
         env:
           WB_TOKEN: ${{ secrets.WB_TOKEN }}
           WB_DOMAIN: www.codebuddy.cn
-          # 推送渠道：serverchan = 微信（Server 酱；免费额度仅约 5 条/天，不宜配 all）
-          #           bark       = iPhone 原生通知（无条数限制，推荐）
-          # 不设本项时默认 serverchan —— 既有部署无需改动
-          NOTIFY_CHANNEL: serverchan
-          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
-          # 改用 Bark：NOTIFY_CHANNEL 改成 bark，并加一行
-          #   BARK_KEY: ${{ secrets.BARK_KEY }}
-          # （BARK_KEY 可填 App 首页那串 key，或整条测试 URL；另有 BARK_SERVER / BARK_GROUP / BARK_LEVEL 可选）
+          # 推送渠道：bark = iPhone 原生通知（无条数限制，推荐）
+          #   ⚠️ 2026-10-25 起由 serverchan 改为 bark。原因：Server 酱免费额度仅 5 条/天，
+          #      而脚本「出错必推」，故障期一天 9 个触发点会把额度瞬间耗尽 -> 连失败告警
+          #      本身都发不出去（因此曾静默失效 5 天无人察觉）。Bark 走 APNs，无条数限制。
+          #   若要改回微信：NOTIFY_CHANNEL 改成 serverchan，并加一行
+          #     SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          NOTIFY_CHANNEL: bark
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          # 自建 Bark 服务器时填自己的域名；留空用官方 https://api.day.app
+          BARK_SERVER: ''
+          # 通知分组（便于在通知中心归类）与级别：
+          #   active(默认) / timeSensitive(可突破专注模式) / critical(静音也响) / passive(静默进列表)
+          BARK_GROUP: workbuddy
+          BARK_LEVEL: active
           # 推送级别：action = 只在领取成功 / 出错时推（默认，每天最多 1 条）
           #           all    = 每次巡检都推（含「今日已签到」这类无动作结果，每天 5 条）
           #           off    = 本仓不推送（什么都不推，也不产生告警注解）
