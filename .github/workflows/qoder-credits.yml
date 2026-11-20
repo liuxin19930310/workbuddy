@@ -1,0 +1,49 @@
+name: Qoder CN Daily Credits
+
+# 每天领取 Qoder CN 的 100 通用 Credits（活动 UTC+8 10:00 刷新，无补领）。
+# 令牌来自仓库 Secret QODER_TOKEN，与本机登录态解耦 —— 电脑不用开机。
+# 令牌有效期见本机 qoder_signin.py doctor 的 token_expires_at；过期需重新写入 Secret。
+#
+# 推送沿用仓库现有 BARK_KEY（iPhone 原生通知，无 Server 酱的 5 条/天限制）。
+# 只在真领到 / 出错时推送，已领过（ALREADY）静默，避免一天 5 次刷屏。
+
+on:
+  schedule:
+    # GitHub cron 用 UTC，北京时间 = UTC + 8。
+    # 5 个时点对应北京 10:05 / 11:05 / 15:05 / 19:05 / 23:05，
+    # 兜住「10:05 活动未下发 / 刚开机网络未就绪」。领取幂等，不会重复发。
+    - cron: '5 2,3,7,11,15 * * *'
+  workflow_dispatch:
+    inputs:
+      force_notify:
+        description: '强制推送一条通知（验证 BARK_KEY / token 是否可用）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qoder-credits
+  cancel-in-progress: false
+
+jobs:
+  claim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Claim Qoder Credits
+        env:
+          QODER_TOKEN: ${{ secrets.QODER_TOKEN }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}
+        run: |
+          EXTRA=""
+          if [ "$FORCE_NOTIFY" = "true" ]; then EXTRA="--force-notify"; fi
+          python qoder_claim.py $EXTRA
