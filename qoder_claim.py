@@ -55,8 +55,18 @@ def bark(title, body, group="qoder", level="active"):
         print("Bark 推送失败:", type(e).__name__, str(e)[:150])
 
 
+def arg_value(flag, default=""):
+    if flag in sys.argv:
+        i = sys.argv.index(flag)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return default
+
+
 def main():
     force = "--force-notify" in sys.argv
+    label = arg_value("--label", "Qoder").strip() or "Qoder"
+    secret = arg_value("--secret", "QODER_TOKEN").strip() or "QODER_TOKEN"
     proc = subprocess.run(
         [sys.executable, os.path.join(HERE, "qoder_signin.py"), "auto"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -71,16 +81,17 @@ def main():
                 pass
     result = out.get("result", "UNKNOWN")
     report = out.get("report") or (proc.stderr or "").strip()[:200] or "无详情"
-    print("result=%s report=%s" % (result, report))
+    print("account=%s result=%s report=%s" % (label, result, report))
 
     if result == "CLAIMED":
-        bark("Qoder 领取成功", report, level="active")
+        bark("%s 领取成功" % label, report, level="active")
     elif result in ("AUTH_REJECTED", "NO_AUTH", "AUTH_ERROR"):
-        bark("Qoder 令牌失效", report + "（需更新仓库 Secret QODER_TOKEN）", level="timeSensitive")
+        bark("%s 令牌失效" % label,
+             report + "（需更新仓库 Secret %s）" % secret, level="timeSensitive")
     elif result in ("NETWORK", "ERROR", "FORBIDDEN"):
-        bark("Qoder 领取异常", report, level="timeSensitive")
+        bark("%s 领取异常" % label, report, level="timeSensitive")
     elif force:
-        bark("Qoder 手动验证", "result=%s %s" % (result, report), level="passive")
+        bark("%s 手动验证" % label, "result=%s %s" % (result, report), level="passive")
 
     return proc.returncode
 
