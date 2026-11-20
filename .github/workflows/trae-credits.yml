@@ -1,0 +1,37 @@
+name: TRAE Daily Credits
+
+on:
+  schedule:
+    # 北京时间每天 08:05 / 12:05 / 20:05（UTC 00:05 / 04:05 / 12:05）
+    - cron: "5 0,4,12 * * *"
+  workflow_dispatch:
+    inputs:
+      force_notify:
+        description: "发送验证推送"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  claim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Claim TRAE Credits
+        env:
+          TRAE_TOKEN: ${{ secrets.TRAE_TOKEN }}
+          TRAE_DEVICE_ID: ${{ secrets.TRAE_DEVICE_ID }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+        run: |
+          EXTRA=""
+          if [ "${{ inputs.force_notify }}" = "true" ]; then EXTRA="--force-notify"; fi
+          python trae_claim.py $EXTRA
