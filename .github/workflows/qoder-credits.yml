@@ -1,8 +1,10 @@
 name: Qoder CN Daily Credits
 
-# 每天领取 Qoder CN 的 100 通用 Credits（活动 UTC+8 10:00 刷新，无补领）。
-# 令牌来自仓库 Secret QODER_TOKEN，与本机登录态解耦 —— 电脑不用开机。
-# 令牌有效期见本机 qoder_signin.py doctor 的 token_expires_at；过期需重新写入 Secret。
+# 每天领取两个 Qoder CN 账号各 100 通用 Credits（活动 UTC+8 10:00 刷新，无补领）。
+# 令牌来自仓库 Secret，与本机登录态解耦 —— 电脑不用开机。
+#   QODER_TOKEN      = 18716238521（867177378@qq.com，L 号）
+#   QODER_TOKEN_MAIN = 15376833948（主号）
+# 令牌过期需本机重新登录对应账号后写回 Secret（见 skill qoder-checkin）。
 #
 # 推送沿用仓库现有 BARK_KEY（iPhone 原生通知，无 Server 酱的 5 条/天限制）。
 # 只在真领到 / 出错时推送，已领过（ALREADY）静默，避免一天 5 次刷屏。
@@ -30,7 +32,16 @@ concurrency:
 jobs:
   claim:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - label: 'Qoder L 18716238521'
+            token_secret: 'QODER_TOKEN'
+          - label: 'Qoder 主号 15376833948'
+            token_secret: 'QODER_TOKEN_MAIN'
     steps:
       - uses: actions/checkout@v5
 
@@ -38,12 +49,14 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Claim Qoder Credits
+      - name: Claim Qoder Credits (${{ matrix.label }})
         env:
-          QODER_TOKEN: ${{ secrets.QODER_TOKEN }}
+          QODER_TOKEN: ${{ secrets[matrix.token_secret] }}
           BARK_KEY: ${{ secrets.BARK_KEY }}
           FORCE_NOTIFY: ${{ github.event.inputs.force_notify }}
+          ACCOUNT_LABEL: ${{ matrix.label }}
+          SECRET_NAME: ${{ matrix.token_secret }}
         run: |
           EXTRA=""
-          if [ "$FORCE_NOTIFY" = "true" ]; then EXTRA="--force-notify"; fi
-          python qoder_claim.py $EXTRA
+          if [ "$FORCE_NOTIFY" = "true" ]; then EXTRA="$EXTRA --force-notify"; fi
+          python qoder_claim.py --label "$ACCOUNT_LABEL" --secret "$SECRET_NAME" $EXTRA
