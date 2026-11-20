@@ -2,8 +2,8 @@ name: Qoder CN Daily Credits
 
 # 每天领取两个 Qoder CN 账号各 100 通用 Credits（活动 UTC+8 10:00 刷新，无补领）。
 # 令牌来自仓库 Secret，与本机登录态解耦 —— 电脑不用开机。
-#   QODER_TOKEN      = 18716238521（867177378@qq.com，L 号）
-#   QODER_TOKEN_MAIN = 15376833948（主号）
+#   QODER_TOKEN      = 18716238521（867177378@qq.com，主号，本机登录态）
+#   QODER_TOKEN_MAIN = 15376833948（备用号，无备份，token 到 2026-12-20）
 # 令牌过期需本机重新登录对应账号后写回 Secret（见 skill qoder-checkin）。
 #
 # 推送沿用仓库现有 BARK_KEY（iPhone 原生通知，无 Server 酱的 5 条/天限制）。
@@ -38,9 +38,9 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - label: 'Qoder L 18716238521'
+          - label: 'Qoder 主号 18716238521'
             token_secret: 'QODER_TOKEN'
-          - label: 'Qoder 主号 15376833948'
+          - label: 'Qoder 备号 15376833948'
             token_secret: 'QODER_TOKEN_MAIN'
     steps:
       - uses: actions/checkout@v5
