@@ -1,1 +1,1 @@
-2026-11-24 08:00:42 +0800 travel event=workflow_dispatch action=claimed
+2026-11-25 03:43:17 +0800 travel event=schedule action=departed
